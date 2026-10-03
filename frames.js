@@ -118,7 +118,7 @@ function paint(ctx, F, asMetal, box) {
 }
 
 // P: {iL,iR,B,eL,eR} pixel points. Draws into ctx (cleared first).
-export function drawGlasses(ctx, P, frameId, shapeId, gScale, accentWarm) {
+export function drawGlasses(ctx, P, frameId, shapeId, gScale, accentWarm, hideTemples = false) {
   const W = ctx.canvas.width, H = ctx.canvas.height;
   ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, W, H);
   const sh = SHAPE_BY_ID[shapeId]; if (!P || !sh || !sh.d || !frameId) return;
@@ -144,7 +144,7 @@ export function drawGlasses(ctx, P, frameId, shapeId, gScale, accentWarm) {
   const outerHinge = edgeX(sh, hingeY, true);
 
   // temples (behind the front)
-  for (const sd of sides) {
+  for (const sd of hideTemples ? [] : sides) {
     const hx = outerHinge + 0.12, hinge = toScreen(sd, hx, hingeY);
     const earLocal = ((sd.ear.x - C.x) * e.x + (sd.ear.y - C.y) * e.y) * sd.sign / sd.s;
     if (earLocal > hx + 0.02) {

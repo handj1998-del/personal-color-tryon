@@ -3,18 +3,43 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#fdf6f9">
+<meta name="theme-color" content="#f7dbe8">
+<meta name="description" content="안경테 · 헤어 컬러 · 헤어스타일 실시간 가상 피팅 (퍼스널컬러 상담용, 사진은 기기 밖으로 전송되지 않음)">
 <title>퍼스널컬러 가상 피팅 · 안경 & 헤어</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="컬러피팅">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="application-name" content="컬러피팅">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <header class="top">
   <div class="brand"><span class="logo">🎨</span><div><h1>퍼스널컬러 가상 피팅</h1><p>안경테 · 헤어 컬러 · 헤어스타일 실시간 테스트</p></div></div>
-  <div class="modes" role="tablist">
-    <button id="btnLive" class="mode on" role="tab">📷 라이브</button>
-    <button id="btnPhoto" class="mode" role="tab">🖼️ 사진</button>
+  <div class="top-right">
+    <button id="btnInstall" class="install" hidden>📲 <span>앱 설치</span></button>
+    <div class="modes" role="tablist">
+      <button id="btnLive" class="mode on" role="tab">📷 라이브</button>
+      <button id="btnPhoto" class="mode" role="tab">🖼️ 사진</button>
+    </div>
   </div>
 </header>
+<div id="iosGuide" class="sheet" hidden>
+  <div class="sheet-box" role="dialog" aria-labelledby="iosTitle">
+    <h2 id="iosTitle">홈 화면에 앱 추가</h2>
+    <ol>
+      <li>Safari 아래(또는 위)의 <b>공유 버튼</b> <span class="ico">⬆︎</span> 을 누르세요.</li>
+      <li>목록에서 <b>‘홈 화면에 추가’</b>를 선택하세요.</li>
+      <li>오른쪽 위 <b>‘추가’</b>를 누르면 앱 아이콘이 생깁니다.</li>
+    </ol>
+    <p class="note">Chrome·카카오톡 등 다른 앱 안에서 열었다면 먼저 Safari로 열어 주세요.</p>
+    <button id="iosClose" class="ctrl primary">확인</button>
+  </div>
+</div>
 
 <main class="layout">
   <section class="stage-wrap">

@@ -1,0 +1,22 @@
+{
+  "name": "퍼스널컬러 가상 피팅",
+  "short_name": "컬러피팅",
+  "description": "안경테 · 헤어 컬러 · 헤어스타일을 얼굴에 실시간으로 가상 피팅하는 퍼스널컬러 상담 도구 (사진은 기기 밖으로 전송되지 않음)",
+  "id": "./",
+  "start_url": "./?source=pwa",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "any",
+  "lang": "ko",
+  "dir": "ltr",
+  "background_color": "#fdf6f9",
+  "theme_color": "#f7dbe8",
+  "categories": ["beauty", "lifestyle", "photo"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

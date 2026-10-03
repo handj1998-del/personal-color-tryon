@@ -3,12 +3,14 @@ import { FRAMES, SHAPES, drawGlasses, shapeIconSVG, mix, rgba } from './frames.j
 import { STYLES, BANGS, OVAL_IDX, CANON, buildStyle, colorize, fitAffine, templateTransform, invAffine, styleIconSVG } from './hairstyle.js';
 
 const MP_VER = '1.0.1';
-const MP_URL = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VER}/vision_bundle.mjs`;
-const WASM_URL = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VER}/wasm`;
-const FACE_MODEL = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
+// MediaPipe runtime + models are self-hosted under ./vendor so the service worker can cache them (offline use)
+const VENDOR = new URL('./vendor/mediapipe/', import.meta.url).href;
+const MP_URL = VENDOR + 'vision_bundle.mjs';
+const WASM_URL = VENDOR + 'wasm';
+const FACE_MODEL = VENDOR + 'face_landmarker.task';
 // hair segmentation (masks: [background, hair]). The multiclass selfie model was ~6x slower on CPU, so the
 // neck occluder is geometric and the forehead fill uses non-hair pixels inside the face oval.
-const SEG_MODEL = 'https://storage.googleapis.com/mediapipe-models/image_segmenter/hair_segmenter/float32/latest/hair_segmenter.tflite';
+const SEG_MODEL = VENDOR + 'hair_segmenter.tflite';
 
 /* ------------------------------------------------------------------ data */
 const TYPES = {
@@ -62,6 +64,22 @@ const fillC = mk(), fillX = fillC.getContext('2d');
 const occC = mk(), occX = occC.getContext('2d');
 const occFC = mk(), occFX = occFC.getContext('2d');
 const occ2 = mk(), occ2X = occ2.getContext('2d');
+const cshC = mk(), cshX = cshC.getContext('2d'), cshC2 = mk(), cshX2 = cshC2.getContext('2d');
+const grainL = mk(), grainLX = grainL.getContext('2d');
+let grainC = null;
+// grain texture: high-pass of a cheek patch (gray 128 = no change) used with soft-light over filled areas
+function makeGrain(P) {
+  if (!P || !P.aff || rawC.width < 64) return;
+  const A = P.aff, X = A.a * 0.5 + A.c * 0.38 + A.e, Y = A.b * 0.5 + A.d * 0.38 + A.f;
+  const sz = clamp(Math.round(Math.hypot(A.a, A.b) * 0.3), 24, 96), x0 = Math.round(X - sz / 2), y0 = Math.round(Y - sz / 2);
+  if (x0 < 0 || y0 < 0 || x0 + sz > rawC.width || y0 + sz > rawC.height) return;
+  const src = rawX.getImageData(x0, y0, sz, sz).data, Lm = new Float32Array(sz * sz);
+  for (let i = 0; i < sz * sz; i++) Lm[i] = 0.299 * src[i * 4] + 0.587 * src[i * 4 + 1] + 0.114 * src[i * 4 + 2];
+  const bl = boxBlur(Lm, sz, sz, 3);
+  const c = mk(sz, sz), x = c.getContext('2d'), id = x.createImageData(sz, sz);
+  for (let i = 0; i < sz * sz; i++) { const v = clamp(128 + (Lm[i] - bl[i]) * 1.6, 0, 255); id.data[i * 4] = id.data[i * 4 + 1] = id.data[i * 4 + 2] = v; id.data[i * 4 + 3] = 255; }
+  x.putImageData(id, 0, 0); grainC = c;
+}
 const segIn = mk(), segX = segIn.getContext('2d', { willReadFrequently: true });
 
 let MP = null, face = null, seg = null, faceMode = null, segMode = null, delegate = 'GPU';
@@ -214,16 +232,47 @@ function buildSeg(masks, w, h, prev, lmP) {
       P.oval.forEach((q, i) => { const x = q.x / segScaleX, y = q.y / segScaleY; i ? occX.lineTo(x, y) : occX.moveTo(x, y); });
       occX.closePath(); occX.fill(); const od = occX.getImageData(0, 0, w, h).data; inOval = new Uint8Array(w * h); for (let i = 0; i < w * h; i++) inOval[i] = od[i * 4 + 3] > 100 ? 1 : 0;
     }
+    // skin reference sampled from both cheeks + forehead centre (not hair); also gives the photo's lighting
+    const smp = (cx, cy) => { if (!aff) return null; const X = (aff.a * cx + aff.c * cy + aff.e) / segScaleX, Y = (aff.b * cx + aff.d * cy + aff.f) / segScaleY;
+      const r = Math.max(2, Math.round(w / 90)); let n = 0, R = 0, G = 0, B = 0;
+      for (let yy = Math.round(Y) - r; yy <= Math.round(Y) + r; yy++) for (let xx = Math.round(X) - r; xx <= Math.round(X) + r; xx++) {
+        if (xx < 0 || yy < 0 || xx >= w || yy >= h || raw[yy * w + xx] > 0.3) continue; const j = (yy * w + xx) * 4; R += px[j]; G += px[j + 1]; B += px[j + 2]; n++; }
+      return n ? [R / n, G / n, B / n] : null; };
+    const cl = smp(-0.52, 0.35), cr = smp(0.52, 0.35), fc = smp(0, -0.62);
+    const refs = [cl, cr, fc].filter(Boolean);
+    const skin = refs.length ? [0, 1, 2].map((k) => refs.reduce((a2, r2) => a2 + r2[k], 0) / refs.length) : null;
+    const lumOf = (c) => c ? 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2] : 0;
+    out.skin = skin; out.light = cl && cr ? clamp((lumOf(cr) - lumOf(cl)) / (lumOf(cr) + lumOf(cl) + 1) * 2.5, -1, 1) : 0;
+    out.expo = skin ? clamp(lumOf(skin) / 165, 0.55, 1.25) : 1;
     const known = new Float32Array(w * h), knownSkin = new Float32Array(w * h), hole = new Float32Array(w * h);
     for (let i = 0; i < w * h; i++) {
       const hv = clamp(dil[i] * 3.2 - 0.15, 0, 1); hole[i] = hv;
       known[i] = hv > 0.05 || (inOval && inOval[i]) ? 0 : 1; // background/clothes only
-      knownSkin[i] = hv < 0.05 && inOval && inOval[i] ? 1 : 0;   // skin (inside the face oval)
+      if (hv < 0.05 && inOval && inOval[i]) { // skin-coloured pixels only (no brows/eyes/lips)
+        if (!skin) knownSkin[i] = 1; else { const j = i * 4, d = Math.abs(px[j] - skin[0]) + Math.abs(px[j + 1] - skin[1]) + Math.abs(px[j + 2] - skin[2]); knownSkin[i] = d < 70 ? 1 : 0; }
+      }
     }
     const filled = pushPull(px, w, h, known), skinFill = inOval ? pushPull(px, w, h, knownSkin) : null;
+    // background: mirror the texture from just outside each hole run (keeps wall/clothes texture), blended with the smooth fill
+    const refl = new Float32Array(filled);
+    for (let y = 0; y < h; y++) {
+      let x = 0;
+      while (x < w) {
+        const i0 = y * w + x;
+        if (!(hole[i0] > 0.05 && !(inOval && inOval[i0]))) { x++; continue; }
+        let e = x; while (e + 1 < w && hole[y * w + e + 1] > 0.05 && !(inOval && inOval[y * w + e + 1])) e++;
+        const lk = x > 0 && known[y * w + x - 1] > 0, rk = e + 1 < w && known[y * w + e + 1] > 0;
+        for (let xx = x; xx <= e; xx++) {
+          let src = -1;
+          if (lk && (!rk || xx - x <= e - xx)) src = x - 1 - (xx - x); else if (rk) src = e + 1 + (e - xx);
+          if (src >= 0 && src < w && known[y * w + src] > 0) { const k = y * w + xx, j = (y * w + src) * 4; refl[k * 3] = px[j] * 0.7 + filled[k * 3] * 0.3; refl[k * 3 + 1] = px[j + 1] * 0.7 + filled[k * 3 + 1] * 0.3; refl[k * 3 + 2] = px[j + 2] * 0.7 + filled[k * 3 + 2] * 0.3; }
+        }
+        x = e + 1;
+      }
+    }
     const fid = new ImageData(w, h);
     for (let i = 0; i < w * h; i++) {
-      const src = skinFill && inOval[i] ? skinFill : filled;
+      const src = skinFill && inOval[i] ? skinFill : refl;
       fid.data[i * 4] = src[i * 3]; fid.data[i * 4 + 1] = src[i * 3 + 1]; fid.data[i * 4 + 2] = src[i * 3 + 2]; fid.data[i * 4 + 3] = hole[i] * 255;
     }
     out.fill = fid;
@@ -295,11 +344,18 @@ function styleHex() {
   const o = origHex || '#3b2b22';
   return S.hair ? mix(o, S.hair.c, clamp(S.intensity * 1.15, 0, 1)) : o;
 }
+let look = null; // lighting/exposure/skin taken from the photo (frozen during a live session to avoid re-colorizing)
+function styleLook() {
+  if (hairMask && hairMask.skin && (!look || S.mode !== 'live')) {
+    look = { light: Math.round(hairMask.light * 4) / 4, expo: Math.round(hairMask.expo * 10) / 10, skin: hairMask.skin.map((v) => Math.round(v / 10) * 10) };
+  }
+  return look || { light: 0, expo: 1, skin: null };
+}
 function coloredStyle(st) {
-  const hex = styleHex(), key = st.id + '|' + st.bang + '|' + hex;
+  const hex = styleHex(), lk = styleLook(), key = st.id + '|' + st.bang + '|' + hex + '|' + lk.light + '|' + lk.expo + '|' + lk.skin;
   if (!colorCache[key]) {
-    if (Object.keys(colorCache).length > 12) for (const k in colorCache) delete colorCache[k];
-    colorCache[key] = { back: colorize(st.back, hex, hairLUT), front: st.front ? colorize(st.front, hex, hairLUT) : null };
+    if (Object.keys(colorCache).length > 8) for (const k in colorCache) delete colorCache[k];
+    colorCache[key] = { back: colorize(st.back, hex, hairLUT, lk), front: st.front ? colorize(st.front, hex, hairLUT, lk) : null };
   }
   return colorCache[key];
 }
@@ -313,7 +369,17 @@ function compose(W, H, P, mask) {
   if (st) {
     ensure(baseC, W, H); ensure(occFC, W, H);
     baseX.drawImage(rawC, 0, 0);
-    if (mask && mask.fill) { ensure(fillC, mask.w, mask.h); fillX.putImageData(mask.fill, 0, 0); baseX.imageSmoothingEnabled = true; baseX.drawImage(fillC, 0, 0, W, H); }
+    if (mask && mask.fill) {
+      ensure(fillC, mask.w, mask.h); fillX.putImageData(mask.fill, 0, 0); baseX.imageSmoothingEnabled = true; baseX.drawImage(fillC, 0, 0, W, H);
+      // re-add fine skin/photo grain (sampled from the cheek) where the fill is, so it doesn't look smeared
+      if (!grainC) makeGrain(P);
+      if (grainC) {
+        ensure(grainL, W, H); grainLX.globalCompositeOperation = 'source-over'; grainLX.clearRect(0, 0, W, H);
+        grainLX.fillStyle = grainLX.createPattern(grainC, 'repeat'); grainLX.fillRect(0, 0, W, H);
+        grainLX.globalCompositeOperation = 'destination-in'; grainLX.drawImage(fillC, 0, 0, W, H);
+        baseX.save(); baseX.globalCompositeOperation = 'soft-light'; baseX.drawImage(grainL, 0, 0); baseX.restore();
+      }
+    }
     const col = coloredStyle(st), T = templateTransform(P.aff);
     outX.drawImage(baseC, 0, 0);
     outX.save(); outX.setTransform(...T); outX.imageSmoothingQuality = 'high'; outX.drawImage(col.back, 0, 0); outX.restore();
@@ -339,14 +405,35 @@ function compose(W, H, P, mask) {
     occFX.globalCompositeOperation = 'destination-in'; occFX.imageSmoothingEnabled = true; occFX.drawImage(occ2, 0, 0, W, H);
     occFX.globalCompositeOperation = 'source-over';
     outX.drawImage(occFC, 0, 0);
-    if (col.front) { outX.save(); outX.setTransform(...T); outX.drawImage(col.front, 0, 0); outX.restore(); }
+    // contact shadow on the face where hair meets it (temples/sides/forehead), not on the chin
+    {
+      const sw2 = Math.round(W / 8), sh2 = Math.round(H / 8), kx2 = sw2 / W, ky2 = sh2 / H; ensure(cshC, sw2, sh2);
+      cshX.globalCompositeOperation = 'source-over'; cshX.clearRect(0, 0, sw2, sh2);
+      const ovalPath = () => { cshX.beginPath(); P.oval.forEach((p, i) => { i ? cshX.lineTo(p.x * kx2, p.y * ky2) : cshX.moveTo(p.x * kx2, p.y * ky2); }); cshX.closePath(); };
+      cshX.strokeStyle = '#000'; cshX.lineWidth = fh * kx2 * (st.g === 'm' ? 0.07 : 0.11); ovalPath(); cshX.stroke();
+      cshX.globalCompositeOperation = 'destination-in'; cshX.fillStyle = '#000'; ovalPath(); cshX.fill();
+      const gg = cshX.createLinearGradient(P.top.x * kx2, P.top.y * ky2, P.chin.x * kx2, P.chin.y * ky2);
+      gg.addColorStop(0, 'rgba(0,0,0,1)'); gg.addColorStop(0.4, 'rgba(0,0,0,0.55)'); gg.addColorStop(0.72, 'rgba(0,0,0,0)');
+      cshX.fillStyle = gg; cshX.fillRect(0, 0, sw2, sh2);
+      outX.save(); outX.globalAlpha = 0.18; outX.imageSmoothingEnabled = true; outX.drawImage(cshC, 0, 0, W, H); outX.restore();
+    }
+    if (col.front) {
+      // soft drop shadow of bangs / side locks onto the face
+      const sw3 = Math.round(W / 6), sh3 = Math.round(H / 6); ensure(cshC2, sw3, sh3);
+      cshX2.globalCompositeOperation = 'source-over'; cshX2.clearRect(0, 0, sw3, sh3);
+      cshX2.setTransform(...T.map((v, i) => v * (i % 2 === 0 ? sw3 / W : sh3 / H)));
+      cshX2.drawImage(col.front, 0, 0); cshX2.setTransform(1, 0, 0, 1, 0, 0);
+      cshX2.globalCompositeOperation = 'source-in'; cshX2.fillStyle = 'rgb(30,15,10)'; cshX2.fillRect(0, 0, sw3, sh3);
+      outX.save(); outX.globalAlpha = 0.3; outX.drawImage(cshC2, 0, fh * 0.025, W, H); outX.restore();
+      outX.save(); outX.setTransform(...T); outX.drawImage(col.front, 0, 0); outX.restore();
+    }
   } else {
     outX.drawImage(rawC, 0, 0);
     if (S.hair) applyHair(outX, W, H, mask, S.hair.c, S.intensity);
   }
   const t1 = performance.now(); stats.hairMs = stats.hairMs * 0.9 + (t1 - t0) * 0.1;
   if (P && S.shape !== 'none') {
-    drawGlasses(glassX, P, S.frame, S.shape, S.gScale, TYPES[S.type].warm);
+    drawGlasses(glassX, P, S.frame, S.shape, S.gScale, TYPES[S.type].warm, !!(st && st.g === 'f' && !st.ears));
     const d = Math.hypot(P.iR.x - P.iL.x, P.iR.y - P.iL.y);
     const sw = Math.max(8, Math.round(W / 6)), sh = Math.max(8, Math.round(H / 6));
     ensure(shadowC, sw, sh);
@@ -417,7 +504,7 @@ async function goLive() {
   try {
     if (!cameraOK) await startCamera();
     await ensureMode('VIDEO');
-    S.mode = 'live'; hairMask = null; lm = null; origHex = null; resetFilters();
+    S.mode = 'live'; hairMask = null; lm = null; origHex = null; grainC = null; look = null; resetFilters();
     stage.classList.remove('is-still', 'no-live'); $('placeholder').classList.add('hide');
     $('btnLive').classList.add('on'); $('btnPhoto').classList.remove('on');
     if (!liveRAF) liveLoop();
@@ -448,7 +535,7 @@ function rebuildStillSeg() { // style toggled on a still: recompute inpaint/neck
 }
 function renderStill() { if (S.mode !== 'still') return; compose(rawC.width, rawC.height, lm, hairMask); present(); }
 async function loadStillFrom(src, sw, sh, mirrorIt) {
-  stopLoop(); S.mode = 'still'; mirror = mirrorIt; origHex = null;
+  stopLoop(); S.mode = 'still'; mirror = mirrorIt; origHex = null; grainC = null; look = null;
   const s = Math.min(1, 1600 / Math.max(sw, sh));
   rawC.width = Math.round(sw * s); rawC.height = Math.round(sh * s);
   rawX.drawImage(src, 0, 0, rawC.width, rawC.height);
@@ -606,3 +693,24 @@ window.__pc.selectStyle = (id, bang) => { selectStyle(id, bang); return new Prom
 window.__pc.set = (o) => { Object.assign(S, o); renderTypes(); renderHair(); renderFrames(); renderShapes(); renderStyles(); rerender(); };
 window.__pc.loadSample = loadSample;
 boot().then(() => { window.__pc.ready = true; });
+
+// ---------- PWA: service worker + install button ----------
+if ('serviceWorker' in navigator && location.protocol !== 'file:' && !new URLSearchParams(location.search).has('nosw')) {
+  addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch((e) => console.warn('SW', e)));
+}
+{
+  const btn = document.getElementById('btnInstall'), guide = document.getElementById('iosGuide');
+  const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+  const ua = navigator.userAgent, isIOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  let deferred = null;
+  addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); deferred = e; if (!standalone) btn.hidden = false; });
+  addEventListener('appinstalled', () => { btn.hidden = true; deferred = null; });
+  if (isIOS && !standalone) btn.hidden = false;
+  btn.addEventListener('click', async () => {
+    if (deferred) { deferred.prompt(); const r = await deferred.userChoice; if (r.outcome === 'accepted') btn.hidden = true; deferred = null; }
+    else guide.hidden = false;
+  });
+  document.getElementById('iosClose').addEventListener('click', () => { guide.hidden = true; });
+  guide.addEventListener('click', (e) => { if (e.target === guide) guide.hidden = true; });
+  window.__pwa = { get deferred() { return !!deferred; }, isIOS, standalone };
+}

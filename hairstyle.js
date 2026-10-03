@@ -40,14 +40,14 @@ export const STYLES = [
   { id: 'hippie', jag: 0.06, n: '히피펌', g: 'f', bang: 'seethrough', curl: { amp: 0.045, len: 0.2, y: -1.4 }, frizz: 1, len: [0.35, 0.8],
     mass: [[0, -2.16], [0.7, -2.1], [1.19, -1.85], [1.5, -1.3], [1.64, -0.5], [1.75, 0.4], [1.92, 1.4], [2.02, 2.3], [1.86, 3.0], [1.46, 3.2], [1.02, 3.1], [0.86, 2.6], [0.5, 2.45], [0, 2.4]],
     frame: { cover: 0.08, y0: -0.75, y1: 1.4 } },
-  { id: 'ponytail', n: '포니테일(묶음)', g: 'f', bang: 'none', flow: 'back', len: [0.5, 1.2],
+  { id: 'ponytail', ears: true, n: '포니테일(묶음)', g: 'f', bang: 'none', flow: 'back', len: [0.5, 1.2],
     mass: [[0, -1.99], [0.55, -1.94], [0.97, -1.69], [1.16, -1.25], [1.18, -0.7], [1.1, -0.3], [1.0, -0.12], [0.94, -0.4], [0.5, -0.3], [0, -0.3]],
     extra: [{ layer: 'back', pts: [[1.0, -1.15], [1.3, -0.7], [1.45, 0.3], [1.5, 1.3], [1.4, 2.15], [1.22, 2.25], [1.16, 1.4], [1.12, 0.4], [1.02, -0.4]], src: [1.05, -1.3] }] },
   { id: 'dandy', flow: 'fwd', jag: 0.035, n: '댄디컷', g: 'm', bang: 'dandy', len: [0.3, 0.8],
     mass: [[0, -2.02], [0.6, -1.98], [1.0, -1.74], [1.15, -1.3], [1.14, -0.8], [1.07, -0.42], [1.03, -0.1], [0.99, 0.08], [0.95, -0.2], [0.5, -0.3], [0, -0.3]] },
-  { id: 'twoblock', flow: 'fwd', jag: 0.035, n: '투블럭', g: 'm', bang: 'dandy_short', len: [0.3, 0.8],
+  { id: 'twoblock', ears: true, flow: 'fwd', jag: 0.035, n: '투블럭', g: 'm', bang: 'dandy_short', len: [0.3, 0.8],
     mass: [[0, -2.06], [0.62, -2.01], [1.02, -1.77], [1.17, -1.36], [1.15, -1.02], [0.9, -0.97], [0, -0.92]],
-    buzz: [[0.86, -1.25], [1.1, -1.15], [1.08, -0.55], [1.04, -0.12], [0.99, 0.08], [0.95, -0.4], [0.86, -0.9]] },
+    buzz: [[0.84, -1.3], [1.14, -1.2], [1.12, -0.55], [1.06, -0.12], [0.99, 0.1], [0.93, -0.4], [0.84, -0.9]] },
   { id: 'leaf', flow: 'fwd', jag: 0.035, n: '리프컷', g: 'm', bang: 'leaf', len: [0.4, 0.9],
     mass: [[0, -2.03], [0.62, -1.99], [1.02, -1.75], [1.18, -1.3], [1.2, -0.7], [1.14, -0.3], [1.06, 0.06], [0.98, 0.0], [0.5, -0.3], [0, -0.3]] },
   { id: 'garma', jag: 0.03, n: '가르마펌', g: 'm', bang: 'garma', part: 0.42, curl: { amp: 0.035, len: 0.55, y: -2.5 }, len: [0.4, 1.0],
@@ -90,12 +90,12 @@ function catmullD(pts, closed = true) {
   }
   return d + (closed ? ' Z' : '');
 }
-function jitter(pts, amp, seed) {
-  if (!amp) return pts; const r = rng(seed), out = [];
+function jitter(pts, amp, seed, spiky = false) {
+  if (!amp) return pts; const r = rng(seed), out = []; let kk = 0;
   for (let i = 0; i < pts.length; i++) {
-    const a = pts[i], b = pts[(i + 1) % pts.length]; const n = Math.max(1, Math.round(Math.hypot(b[0] - a[0], b[1] - a[1]) / 0.09));
+    const a = pts[i], b = pts[(i + 1) % pts.length]; const n = Math.max(1, Math.round(Math.hypot(b[0] - a[0], b[1] - a[1]) / (spiky ? 0.055 : 0.09)));
     for (let k = 0; k < n; k++) { const t = k / n, x = a[0] + (b[0] - a[0]) * t, y = a[1] + (b[1] - a[1]) * t;
-      const dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy) || 1, j = (r() - 0.5) * 2 * amp * (y > -1.0 || Math.abs(x) > 0.8 ? 1 : 0.4);
+      const dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy) || 1, j = (spiky && y > -1.05 ? ((kk++ % 2) ? 1 : -0.6) * (0.6 + 0.6 * r()) : (r() - 0.5) * 2) * amp * (y > -1.0 || Math.abs(x) > 0.8 ? 1 : 0.4);
       out.push([x + (dy / l) * j, y - (dx / l) * j]); }
   }
   return out;
@@ -108,6 +108,7 @@ function frameLock(fr, sign) { // face-framing lock, in canonical coords
 }
 
 /* ---------------- rendering ---------------- */
+const clamp255 = (v) => Math.max(0, Math.min(255, v));
 function rng(seed) { let s = seed >>> 0 || 1; return () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296); }
 function gauss(r) { return (r() + r() + r() - 1.5) / 1.5; }
 function blurF(src, w, h, r) { // separable box blur (2 passes ~ gaussian)
@@ -186,16 +187,21 @@ function drawStrands(ctx, M, flow, o, r) {
     const cl = clumpN(cc, o.phase || 0);
     if (o.sparse && cl < 0.5) continue;
     if (o.curl) { // waves/curls along arc length, coherent within a clump
-      const ph = cc * (o.frizz ? 0.45 : 0.25) + sx * 0.8; let s = 0; const base = pts.map((p) => p.slice());
+      const ph = o.frizz ? r() * 6.283 : cc * 0.25 + sx * 0.8, am = o.frizz ? 0.55 + r() * 0.9 : 1, ln = o.curl.len * (o.frizz ? 0.75 + r() * 0.5 : 1);
+      let s = 0; const base = pts.map((p) => p.slice());
       for (let i = 1; i < pts.length; i++) {
         const [ax, ay] = base[i - 1], [bx, by] = base[i]; s += Math.hypot(bx - ax, by - ay);
         const [vx, vy] = norm(bx - ax, by - ay); const ramp = smooth(o.curl.y, o.curl.y + 0.5, by) * smooth(0.1, 0.6, vy);
-        const off = Math.sin(by / o.curl.len * Math.PI * 2 + ph) * o.curl.amp * ramp;
-        pts[i] = [bx - vy * off, by + vx * off];
+        const th = (o.frizz ? s : by) / ln * Math.PI * 2 + ph;
+        const off = Math.sin(th) * o.curl.amp * am * ramp, al = o.frizz ? Math.cos(th) * o.curl.amp * am * 0.7 * ramp : 0; // frizz: looping coils
+        pts[i] = [bx - vy * off + vx * al, by + vx * off + vy * al];
       }
     }
-    const L0 = (0.44 + gauss(r) * 0.09) * (0.6 + 0.8 * cl);
-    const A0 = 0.35 + r() * 0.4, lw = (0.8 + r() * 0.9) / SC * (o.wMul || 1);
+    // layer: 0 = dark under-layer (thicker), 1 = main, 2 = fine highlight strands on top
+    const lr = r(), layer = lr < 0.3 ? 0 : lr < 0.88 ? 1 : 2;
+    const L0 = (0.44 + gauss(r) * 0.08) * (0.65 + 0.7 * cl) * (layer === 0 ? 0.62 : layer === 2 ? 1.18 : 1);
+    const A0 = (layer === 2 ? 0.25 : 0.35) + r() * 0.4, lw = (layer === 0 ? 1.5 + r() * 1.2 : layer === 2 ? 0.5 + r() * 0.4 : 0.7 + r() * 0.8) / SC * (o.wMul || 1);
+    const tone = Math.round(clamp255(128 + (cl - 0.5) * 110 + gauss(r) * 38)); // highlight/lowlight variation
     // draw in chunks so brightness can vary along the strand (sheen band, root/edge shadows, faded tips)
     const n = pts.length, CH = 8;
     for (let i0 = 0; i0 < n - 1; i0 += CH) {
@@ -204,22 +210,37 @@ function drawStrands(ctx, M, flow, o, r) {
       const depth = fld(M.soft, mx, my);                    // ~0 near the silhouette, 1 deep inside
       const neck = Math.exp(-mx * mx / 0.9) * smooth(0.6, 1.5, my) * 0.62 * (1 - smooth(2.2, 2.8, my) * 0.4);
       const faceEdge = (my > -0.55 && my < 1.6) ? Math.max(0, 1 - Math.abs(Math.abs(mx) - ovalX(Math.min(my, 1.3))) / 0.22) * 0.3 : 0;
-      let L = L0 * (0.55 + 0.45 * depth) * (1 - neck - faceEdge) + ring * (0.18 + 0.14 * cl * cl);
+      const t0 = (i0 + i1) / 2 / n;
+      let L = L0 * (0.55 + 0.45 * depth) * (1 - neck - faceEdge) * (0.74 + 0.26 * smooth(0, 0.35, t0)) + ring * (0.2 + 0.14 * cl * cl) * (layer === 0 ? 0.3 : 1);
       L = Math.max(0.05, Math.min(0.96, L));
       const t = (i0 + i1) / 2 / n, taper = smooth(0, 0.15, t) * smooth(1, 0.8, t);
       const edgeA = smooth(0.0, 0.35, fld(M.soft2, mx, my) + 0.12);
       const a = A0 * taper * edgeA; if (a < 0.02) continue;
       const v = Math.round(L * 255);
-      segs.push([`rgba(${v},${v},${v},${a.toFixed(2)})`, lw, pts.slice(i0, i1 + 1)]);
+      segs.push([`rgba(${v},${tone},0,${a.toFixed(2)})`, lw, pts.slice(i0, i1 + 1), layer]);
     }
   }
+  // flyaways: a few fine, slightly wandering strands that cross the silhouette so edges don't look cut out
+  if (!o.noFly) {
+    const NF = Math.round(M.area * (o.frizz ? 90 : 45));
+    for (let k = 0; k < NF; k++) {
+      let sx, sy, tries = 0;
+      do { sx = X0 + r() * (TW / SC); sy = Y0 + r() * (TH / SC); tries++; } while (!(inM(M, sx, sy) && fld(M.soft2, sx, sy) < 0.6) && tries < 80);
+      if (tries >= 80) continue;
+      const pts = [[sx, sy]]; let x = sx, y = sy, wob = (r() - 0.5) * 1.1; const L = 0.35 + r() * 0.45;
+      let out = 0; for (let i = 0; i < 25 + r() * 35; i++) { let [vx, vy] = flow(x, y); const c = Math.cos(wob), sn = Math.sin(wob); [vx, vy] = [vx * c - vy * sn, vx * sn + vy * c]; wob += (r() - 0.5) * 0.35; x += vx * 0.01; y += vy * 0.01; if (!inM(M, x, y) && ++out > 14) break; pts.push([x, y]); }
+      if (pts.length < 6) continue;
+      const v = Math.round(L * 255); segs.push([`rgba(${v},150,0,${(0.18 + r() * 0.22).toFixed(2)})`, (0.45 + r() * 0.35) / SC, pts, 3]);
+    }
+  }
+  segs.sort((a, b) => a[3] - b[3]);
   for (const [col, lw, p] of segs) { ctx.strokeStyle = col; ctx.lineWidth = lw; ctx.beginPath(); ctx.moveTo(p[0][0], p[0][1]); for (let i = 1; i < p.length; i++) ctx.lineTo(p[i][0], p[i][1]); ctx.stroke(); }
 }
-function softBase(x, M, alpha, lum) { // eroded, feathered under-fill (darker gaps between strands, no hard outline)
+function softBase(x, M, alpha, lum, scalp = 0, fadeY = null) { // eroded, feathered under-fill (darker gaps between strands, no hard outline)
   const id = x.createImageData(TW, TH), d = id.data, v = Math.round(lum * 255);
   for (let y = 0; y < TH; y++) for (let xx = 0; xx < TW; xx++) {
-    const q = M.soft2[(y >> 2) * MW + (xx >> 2)], a = smooth(0.55, 0.95, q) * alpha; if (a <= 0) continue;
-    const i = (y * TW + xx) * 4; d[i] = d[i + 1] = d[i + 2] = Math.round(v * (0.75 + 0.25 * M.soft[(y >> 2) * MW + (xx >> 2)])); d[i + 3] = a * 255;
+    const q = M.soft2[(y >> 2) * MW + (xx >> 2)]; const a = smooth(0.55, 0.95, q) * alpha; if (a <= 0) continue; const sw = fadeY ? scalp * (0.45 + 0.55 * smooth(fadeY[0], fadeY[1], Y0 + y / SC)) : scalp;
+    const i = (y * TW + xx) * 4; d[i] = Math.round(v * (0.75 + 0.25 * M.soft[(y >> 2) * MW + (xx >> 2)])); d[i + 1] = 128; d[i + 2] = sw; d[i + 3] = a * 255;
   }
   const c = document.createElement('canvas'); c.width = TW; c.height = TH; c.getContext('2d').putImageData(id, 0, 0);
   x.save(); x.setTransform(1, 0, 0, 1, 0, 0); x.drawImage(c, 0, 0); x.restore();
@@ -230,24 +251,29 @@ function renderLayer(regions) {
   for (const R of regions) {
     const M = regionMask(R.d), r = rng(R.seed || 1234);
     if (R.buzz) { // shaved sides: translucent stubble
-      softBase(x, M, 0.82, 0.22); x.save(); x.clip(M.path);
+      softBase(x, M, 1, 0.3, 230, [-1.1, -0.2]); x.save(); x.clip(M.path);
       for (let i = 0; i < M.area * 14000; i++) { const sx = X0 + r() * (TW / SC), sy = Y0 + r() * (TH / SC); if (!inM(M, sx, sy)) continue;
-        const v = 50 + r() * 60, a = 0.35 * smooth(0, 0.5, fld(M.soft2, sx, sy) + 0.1); x.strokeStyle = `rgba(${v},${v},${v},${a.toFixed(2)})`; x.lineWidth = 0.8 / SC;
+        const v = 40 + r() * 50, a = 0.5 * smooth(0, 0.5, fld(M.soft2, sx, sy) + 0.1) * (1 - 0.7 * smooth(-1.0, 0.0, sy)); x.strokeStyle = `rgba(${v},128,110,${a.toFixed(2)})`; x.lineWidth = 0.8 / SC;
         x.beginPath(); x.moveTo(sx, sy); x.lineTo(sx + (r() - 0.5) * 0.015, sy + 0.02 + r() * 0.02); x.stroke(); }
       x.restore(); continue;
     }
     if (R.base !== 0) softBase(x, M, R.base ?? 1, 0.3);
     drawStrands(x, M, R.flow, R.o, r);
+    if (R.part !== undefined) { // natural parting: thin line where the scalp shows
+      x.save(); x.clip(M.path); x.strokeStyle = 'rgba(150,128,255,0.55)'; x.lineWidth = 2.2 / SC; x.beginPath();
+      for (let yy = -2.0, i = 0; yy <= -1.2; yy += 0.04, i++) { const xx = R.part + Math.sin(i * 1.7) * 0.008 + (yy + 2) * 0.03 * Math.sign(R.part || 0.01); i ? x.lineTo(xx, yy) : x.moveTo(xx, yy); }
+      x.stroke(); x.restore();
+    }
   }
   return c;
 }
 export function buildStyle(styleId, bangId) {
   const st = STYLES.find((s) => s.id === styleId); if (!st || !st.mass) return null;
-  const part = st.part || 0;
+  const part = st.part ?? (st.g === 'f' ? 0.1 : 0);
   const bottom = Math.max(...st.mass.map((p) => p[1]));
   const baseO = { src: [part, -1.95], len: st.len, curl: st.curl, frizz: st.frizz, cIn: st.cIn, out: st.out, bottom, tie: [0, -1.75] };
   const flowKind = st.flow || 'fall';
-  const back = [{ d: catmullD(jitter(mirrorClosed(st.mass), st.jag || 0.012, 3)), flow: makeFlow(flowKind, baseO), o: { ...baseO, dens: st.frizz ? 1.3 : 1 }, seed: 11 }];
+  const back = [{ d: catmullD(jitter(mirrorClosed(st.mass), st.jag || 0.012, 3)), flow: makeFlow(flowKind, baseO), o: { ...baseO, dens: st.frizz ? 1.3 : 1 }, seed: 11, part: st.g === 'f' && flowKind === 'fall' ? part : undefined }];
   for (const ex of st.extra || []) if (ex.layer === 'back') back.push({ d: catmullD(ex.pts), flow: makeFlow('fall', { ...baseO, src: ex.src }), o: { ...baseO, src: ex.src, len: [0.8, 1.6] }, seed: 21 });
   if (st.buzz) for (const sg of [1, -1]) back.push({ d: catmullD(st.buzz.map(([x, y]) => [x * sg, y])), buzz: true, seed: sg > 0 ? 5 : 6 });
   const front = [];
@@ -258,15 +284,32 @@ export function buildStyle(styleId, bangId) {
   const b = BANGS[bangId || st.bang];
   if (b && b.pts) {
     const bo = { src: b.src, dir: b.dir, bias: b.bias, len: b.len, dens: b.dens, sparse: b.sparse, curl: st.curl && st.frizz ? { amp: 0.025, len: 0.22, y: -1.6 } : null };
-    front.push({ d: catmullD(jitter(b.pts, b.jag ?? (st.g === 'm' ? 0.045 : 0.025), 9)), flow: makeFlow(b.flow, bo), o: bo, seed: 41, base: b.sparse ? 0 : 0.85 });
+    front.push({ d: catmullD(jitter(b.pts, b.jag ?? (st.g === 'm' ? 0.05 : 0.025), 9, st.g === 'm')), flow: makeFlow(b.flow, bo), o: bo, seed: 41, base: b.sparse ? 0 : 0.85 });
   }
-  return { back: renderLayer(back), front: front.length ? renderLayer(front) : null, id: styleId, bang: bangId || st.bang };
+  return { back: renderLayer(back), front: front.length ? renderLayer(front) : null, id: styleId, bang: bangId || st.bang, g: st.g, ears: !!st.ears };
 }
 // colorize a grayscale template with a hair color (same luminance->color LUT idea as the recolor)
-export function colorize(src, hex, lutFn) {
+// Colorize a template. R = luminance, G = tone (highlight/lowlight), B = scalp weight.
+// opts: light (-1..1, side lighting taken from the photo), expo (exposure factor), skin [r,g,b]
+export function colorize(src, hex, lutFn, opts = {}) {
   const c = document.createElement('canvas'); c.width = src.width; c.height = src.height; const x = c.getContext('2d');
   x.drawImage(src, 0, 0); const id = x.getImageData(0, 0, c.width, c.height), d = id.data; const lut = lutFn(hex, 112);
-  for (let i = 0; i < d.length; i += 4) { if (!d[i + 3]) continue; const j = d[i] * 3; d[i] = lut[j]; d[i + 1] = lut[j + 1]; d[i + 2] = lut[j + 2]; }
+  const n = parseInt(hex.slice(1), 16), tl = 0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255);
+  const con = tl > 110 ? 0.62 : tl > 70 ? 0.78 : 0.95;   // light colours: less strand contrast (no streaks)
+  const light = opts.light || 0, expo = opts.expo || 1, sk = opts.skin || [150, 115, 95];
+  const colF = new Float32Array(TW); for (let u = 0; u < TW; u++) { const xc = Math.max(-1, Math.min(1, (X0 + u / SC) / 1.4)); colF[u] = expo * (1 + light * 0.24 * xc); }
+  for (let i = 0, p = 0; i < d.length; i += 4, p++) {
+    if (!d[i + 3]) continue;
+    const L = Math.max(0, Math.min(255, Math.round(112 + (d[i] - 112) * con))), j = L * 3;
+    let r = lut[j], g = lut[j + 1], b = lut[j + 2];
+    const k = (d[i + 1] - 128) / 128;
+    if (k > 0) { r += (r * 0.3 + 22 - r * 0.0) * k * 0.55; g += (g * 0.26 + 16) * k * 0.55; b += (b * 0.18 + 8) * k * 0.55; }
+    else { const m = 1 + k * 0.28; r *= m; g *= m; b *= m; }
+    const f = colF[p % TW]; r *= f; g *= f; b *= f;
+    const w = d[i + 2] / 255;
+    if (w > 0.02) { r = r * (1 - w) + sk[0] * 0.8 * f * w; g = g * (1 - w) + sk[1] * 0.78 * f * w; b = b * (1 - w) + sk[2] * 0.78 * f * w; }
+    d[i] = r; d[i + 1] = g; d[i + 2] = b;
+  }
   x.putImageData(id, 0, 0); return c;
 }
 // least-squares affine canonical->screen from landmark correspondences

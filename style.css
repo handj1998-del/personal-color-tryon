@@ -109,3 +109,17 @@ button,label.pill,label.ctrl{font:inherit;cursor:pointer}
 .style.on{border-color:var(--accent);background:var(--soft)}
 .style span{line-height:1.2;text-align:center;word-break:keep-all}
 @media (max-width:560px){.shapes{grid-auto-columns:76px}.shape svg{width:62px}}
+
+/* PWA install */
+.top-right{display:flex;align-items:center;gap:8px}
+.install{border:1px solid var(--accent);background:#fff;color:#c2557d;border-radius:999px;padding:8px 12px;font-weight:700;white-space:nowrap}
+.install:hover{background:var(--soft)}
+.sheet{position:fixed;inset:0;background:#2a1d2a66;display:flex;align-items:flex-end;justify-content:center;z-index:50;padding:16px;padding-bottom:max(16px,env(safe-area-inset-bottom))}
+.sheet[hidden]{display:none}
+.sheet-box{background:#fff;border-radius:20px;padding:18px 20px;max-width:420px;width:100%;box-shadow:0 10px 40px #0003}
+.sheet-box h2{margin:0 0 8px;font-size:18px}
+.sheet-box ol{margin:0 0 10px;padding-left:20px;line-height:1.7;font-size:15px}
+.sheet-box .ico{display:inline-block;border:1px solid var(--line);border-radius:6px;padding:0 5px}
+.sheet-box .note{font-size:12.5px;color:var(--muted);margin:0 0 12px}
+.sheet-box .ctrl{width:100%}
+@media (max-width:560px){.install{padding:7px 9px;font-size:13px}.install span{display:none}.top-right{gap:6px}}

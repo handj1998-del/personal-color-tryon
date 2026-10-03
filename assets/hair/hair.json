@@ -6,8 +6,8 @@
   },
   "def": "side",
   "hl": {
-   "side": -0.797,
-   "full": -0.463
+   "side": -1.01,
+   "full": -0.617
   }
  },
  "bob": {
@@ -18,9 +18,9 @@
   },
   "def": "none",
   "hl": {
-   "none": -0.49,
-   "full": -0.377,
-   "seethrough": -0.377
+   "none": -1.217,
+   "full": -0.477,
+   "seethrough": -0.49
   }
  },
  "layered_bob": {
@@ -31,9 +31,9 @@
   },
   "def": "seethrough",
   "hl": {
-   "seethrough": -0.497,
-   "none": -0.43,
-   "full": -0.403
+   "seethrough": -0.61,
+   "none": -1.223,
+   "full": -0.503
   }
  },
  "ccurl": {
@@ -44,9 +44,9 @@
   },
   "def": "none",
   "hl": {
-   "none": -1.083,
-   "full": -0.37,
-   "seethrough": -0.39
+   "none": -1.37,
+   "full": -0.47,
+   "seethrough": -0.497
   }
  },
  "hush": {
@@ -57,9 +57,9 @@
   },
   "def": "seethrough",
   "hl": {
-   "seethrough": -0.35,
-   "none": -0.837,
-   "full": -0.363
+   "seethrough": -0.45,
+   "none": -1.217,
+   "full": -0.357
   }
  },
  "long": {
@@ -70,9 +70,9 @@
   },
   "def": "none",
   "hl": {
-   "none": -1.077,
-   "full": -0.383,
-   "seethrough": -0.41
+   "none": -1.383,
+   "full": -0.49,
+   "seethrough": -0.47
   }
  },
  "wave": {
@@ -82,8 +82,8 @@
   },
   "def": "none",
   "hl": {
-   "none": -0.75,
-   "full": -0.363
+   "none": -1.383,
+   "full": -0.43
   }
  },
  "hippie": {
@@ -92,7 +92,7 @@
   },
   "def": "seethrough",
   "hl": {
-   "seethrough": -0.523
+   "seethrough": -0.823
   }
  },
  "ponytail": {
@@ -101,7 +101,7 @@
   },
   "def": "none",
   "hl": {
-   "none": -1.13
+   "none": -1.43
   }
  },
  "dandy": {
@@ -110,7 +110,7 @@
   },
   "def": "dandy",
   "hl": {
-   "dandy": -0.643
+   "dandy": -1.23
   }
  },
  "twoblock": {
@@ -119,7 +119,7 @@
   },
   "def": "dandy_short",
   "hl": {
-   "dandy_short": -0.623
+   "dandy_short": -1.203
   }
  },
  "leaf": {
@@ -128,7 +128,7 @@
   },
   "def": "leaf",
   "hl": {
-   "leaf": -0.51
+   "leaf": -0.737
   }
  },
  "garma": {
@@ -137,7 +137,7 @@
   },
   "def": "garma",
   "hl": {
-   "garma": -0.67
+   "garma": -1.33
   }
  },
  "comma": {
@@ -146,7 +146,7 @@
   },
   "def": "comma",
   "hl": {
-   "comma": -0.597
+   "comma": -1.07
   }
  }
 }

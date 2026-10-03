@@ -133,6 +133,10 @@ function extractLm(res, W, H, t) {
     ovalPrev = oval;
   }
   out.oval = oval;
+  // brows (protected from the forehead cleanup) and upper-eyelid line (lower limit of the cleanup)
+  out.brows = [70, 63, 105, 66, 107, 46, 53, 52, 65, 55, 336, 296, 334, 293, 300, 276, 283, 282, 295, 285].map((i) => ({ x: f[i].x * W, y: f[i].y * H }));
+  out.lids = [159, 386, 27, 257].map((i) => ({ x: f[i].x * W, y: f[i].y * H }));
+  out.eyes = [33, 133, 159, 145, 160, 144, 158, 153, 362, 263, 386, 374, 385, 380, 387, 373].map((i) => ({ x: f[i].x * W, y: f[i].y * H }));
   out.aff = fitAffine([[...CANON[234], out.eL.x, out.eL.y, 2], [...CANON[454], out.eR.x, out.eR.y, 2], [...CANON[10], out.top.x, out.top.y, 1], [...CANON[152], out.chin.x, out.chin.y, 1]]);
   return out;
 }
@@ -267,12 +271,47 @@ function buildSeg(masks, w, h, prev, lmP) {
       }
       out.hairline = cnt ? Math.round(acc / cnt * 50) / 50 : null;
     }
+    // forehead cleanup: thin fringe strands are often missed by the (low-res) segmenter -> inside the forehead zone (above the eyelids,
+    // outside the brows) any clearly non-skin pixel near the hair is treated as hair too, so the old fringe doesn't ghost through
+    let fore = null, prot = null;
+    if (inOval && P.brows && P.eyes) { // brows + eyes are never "hair" (dark thick brows are often half-segmented as hair)
+      ensure(occC, w, h); occX.clearRect(0, 0, w, h); occX.fillStyle = '#fff';
+      const fw = Math.hypot(P.eR.x - P.eL.x, P.eR.y - P.eL.y) / segScaleX, rb = Math.max(2, fw * 0.045), re = Math.max(1.5, fw * 0.028);
+      for (const q of P.eyes) { occX.beginPath(); occX.arc(q.x / segScaleX, q.y / segScaleY, re, 0, 7); occX.fill(); }
+      const pd = occX.getImageData(0, 0, w, h).data; prot = new Float32Array(w * h); for (let i = 0; i < w * h; i++) prot[i] = pd[i * 4 + 3] / 255;
+      const pb = boxBlur(prot, w, h, Math.max(1, Math.round(fw / 40))); for (let i = 0; i < w * h; i++) prot[i] = clamp(pb[i] * 1.6, 0, 1);
+      // brows: only shielded from the colour-based forehead cleanup (narrow), not from the segmenter
+      // brows: brow-shaped polygons (upper contour + lower contour) are kept from the original photo
+      occX.clearRect(0, 0, w, h); occX.filter = `blur(${Math.max(0.5, fw / 160)}px)`;
+      for (const k of [0, 10]) { const B = P.brows.slice(k, k + 10); occX.beginPath(); [...B.slice(0, 5), ...B.slice(5).reverse()].forEach((q, i) => { const x = q.x / segScaleX, y = q.y / segScaleY; i ? occX.lineTo(x, y) : occX.moveTo(x, y); }); occX.closePath(); occX.fill(); }
+      occX.filter = 'none';
+      const bdd = occX.getImageData(0, 0, w, h).data; var browP = new Float32Array(w * h); for (let i = 0; i < w * h; i++) { const bv = bdd[i * 4 + 3] / 255; browP[i] = Math.max(prot[i], bv); prot[i] = Math.max(prot[i], bv); }
+    }
+    if (inOval && skin && prot && P.lids) {
+      fore = new Float32Array(w * h);
+      const near = boxBlur(raw, w, h, Math.max(3, Math.round(w / 18)));
+      const lidY = Math.max(...P.lids.map((q) => q.y)) / segScaleY, br = 0, fw2 = Math.hypot(P.eR.x - P.eL.x, P.eR.y - P.eL.y) / segScaleX;
+      const sL = lumOf(skin);
+      for (let y = 0; y < Math.min(h, Math.floor(lidY - br * 0.2)); y++) for (let x = 0; x < w; x++) {
+        const i = y * w + x; if (!inOval[i] || browP[i] > 0.25 || near[i] < 0.06) continue;
+        const j = i * 4, dc = Math.abs(px[j] - skin[0]) + Math.abs(px[j + 1] - skin[1]) + Math.abs(px[j + 2] - skin[2]);
+        const dl = sL - (0.299 * px[j] + 0.587 * px[j + 1] + 0.114 * px[j + 2]);
+        fore[i] = clamp((Math.max(dc - 45, dl * 2 - 30)) / 45, 0, 1) * clamp((lidY - y) / Math.max(2, fw2 * 0.07), 0, 1);
+      }
+      const fb = boxBlur(fore, w, h, Math.max(1, Math.round(w / 160))); for (let i = 0; i < w * h; i++) fore[i] = clamp(Math.max(fore[i], fb[i] * 2.2), 0, 1);
+    }
+    const skinY = skin ? lumOf(skin) : 0;
+    // below the brows the (blurry) segmenter bleeds onto real skin -> only remove confident hair there
+    const browLowY = P && P.brows ? [...P.brows.slice(5, 10), ...P.brows.slice(15, 20)].reduce((s2, q) => s2 + q.y, 0) / 10 / segScaleY : 1e9;
     const known = new Float32Array(w * h), knownSkin = new Float32Array(w * h), hole = new Float32Array(w * h);
     for (let i = 0; i < w * h; i++) {
-      const hv = inOval && inOval[i] ? clamp(raw[i] * 2.5 - 0.6, 0, 1) : clamp(dil[i] * 3.2 - 0.15, 0, 1); hole[i] = hv;
+      let hv = inOval && inOval[i] ? (Math.floor(i / w) > browLowY ? clamp(raw[i] * 2.6 - 1.0, 0, 1) : clamp(raw[i] * 3.5 - 0.45, 0, 1)) : clamp(dil[i] * 3.2 - 0.15, 0, 1);
+      if (fore && fore[i] > hv) hv = fore[i];
+      if (prot && inOval[i]) hv *= 1 - prot[i];
+      hole[i] = hv;
       known[i] = hv > 0.05 || (inOval && inOval[i]) ? 0 : 1; // background/clothes only
       if (hv < 0.05 && inOval && inOval[i]) { // skin-coloured pixels only (no brows/eyes/lips)
-        if (!skin) knownSkin[i] = 1; else { const j = i * 4, d = Math.abs(px[j] - skin[0]) + Math.abs(px[j + 1] - skin[1]) + Math.abs(px[j + 2] - skin[2]); knownSkin[i] = d < 70 ? 1 : 0; }
+        if (!skin) knownSkin[i] = 1; else { const j = i * 4, d = Math.abs(px[j] - skin[0]) + Math.abs(px[j + 1] - skin[1]) + Math.abs(px[j + 2] - skin[2]); const Ly = 0.299 * px[j] + 0.587 * px[j + 1] + 0.114 * px[j + 2]; knownSkin[i] = d < 70 || (d < 100 && Ly > skinY && Ly < skinY * 1.1) ? 1 : 0; }
       }
     }
     const filled = pushPull(px, w, h, known), skinFill = inOval ? pushPull(px, w, h, knownSkin) : null;
@@ -294,9 +333,14 @@ function buildSeg(masks, w, h, prev, lmP) {
       }
     }
     const fid = new ImageData(w, h);
+    // synthesized forehead skin isn't flat: soft frontal highlight in the middle, slight falloff toward the temples/hairline
+    let fcx = 0, fcy = 0, frx = 1, fry = 1;
+    if (aff) { fcx = (aff.c * -0.7 + aff.e) / segScaleX; fcy = (aff.d * -0.7 + aff.f) / segScaleY; frx = Math.hypot(aff.a, aff.b) / segScaleX * 0.75; fry = Math.hypot(aff.c, aff.d) / segScaleY * 0.5; }
     for (let i = 0; i < w * h; i++) {
-      const src = skinFill && inOval[i] ? skinFill : refl;
-      fid.data[i * 4] = src[i * 3]; fid.data[i * 4 + 1] = src[i * 3 + 1]; fid.data[i * 4 + 2] = src[i * 3 + 2]; fid.data[i * 4 + 3] = hole[i] * 255;
+      const sk2 = skinFill && inOval[i], src = sk2 ? skinFill : refl;
+      let m = 1;
+      if (sk2 && aff) { const dx = (i % w - fcx) / frx, dy = (Math.floor(i / w) - fcy) / fry, r2 = dx * dx + dy * dy; m = 1 + 0.03 * Math.exp(-r2 * 1.6) - 0.14 * Math.min(1, Math.max(0, r2 - 0.6)); }
+      fid.data[i * 4] = src[i * 3] * m; fid.data[i * 4 + 1] = src[i * 3 + 1] * m; fid.data[i * 4 + 2] = src[i * 3 + 2] * m; fid.data[i * 4 + 3] = hole[i] * 255;
     }
     out.fill = fid;
   }
@@ -766,6 +810,7 @@ async function boot() {
   else showPhotoMode();
 }
 window.__pc.selectType = selectType;
+window.__pc.setHairByName = (n) => { S.hair = n === 'orig' ? null : Object.values(TYPES).flatMap((t) => t.hair).find((h) => h.n === n) || S.hair; renderHair(); rerender(); };
 window.__pc.selectStyle = (id, bang) => { selectStyle(id, bang); return new Promise((r) => setTimeout(r, 60)).then(() => { currentStyle(); rerender(); }); };
 window.__pc.set = (o) => { Object.assign(S, o); renderTypes(); renderHair(); renderFrames(); renderShapes(); renderStyles(); rerender(); };
 window.__pc.loadSample = loadSample;

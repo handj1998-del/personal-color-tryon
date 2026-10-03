@@ -1,6 +1,6 @@
 // 퍼스널컬러 가상 피팅 — 100% client-side. Photos/video never leave the device.
 import { FRAMES, SHAPES, SHAPE_BY_ID, drawGlasses, shapeIconSVG, mix, rgba } from './frames.js';
-import { initGlasses3D, drawGlasses3D, preloadGlasses3D } from './glasses3d.js';
+import { initGlasses3D, drawGlasses3D, preloadGlasses3D, purgeGlasses3D } from './glasses3d.js';
 import { faceMetrics, classifyFace, colorMetrics, classifyColor, recommend, SHAPES_KO } from './reco.js';
 import { STYLES, BANGS, OVAL_IDX, CANON, buildStyle, colorize, fitAffine, templateTransform, invAffine, styleIconSVG } from './hairstyle.js';
 
@@ -17,10 +17,28 @@ const SEG_MODEL = VENDOR + 'hair_segmenter.tflite';
 /* ------------------------------------------------------------------ data */
 // Android / low-memory devices: CPU delegate by default (mobile GPU delegates can crash or lose the WebGL context mid-session),
 // smaller caches and a lower display-resolution cap for the glasses pass
-const IS_ANDROID = /Android/i.test(navigator.userAgent);
+// Android detection must not depend on deviceMemory (Galaxy S23 reports 8): UA, UA-CH platform, or the TWA launch
+const IS_ANDROID = /Android/i.test(navigator.userAgent) || /android/i.test(navigator.userAgentData?.platform || '') || /^android-app:/.test(document.referrer) || new URLSearchParams(location.search).get('source') === 'twa';
 const LOWMEM = IS_ANDROID || (navigator.deviceMemory && navigator.deviceMemory <= 4);
 // lite mode (Android / <=4 GB): the recommendation step renders only the selected preview, no combo thumbnails
-const LITE = (LOWMEM || new URLSearchParams(location.search).has('lite')) && !new URLSearchParams(location.search).has('full');
+const QP0 = new URLSearchParams(location.search);
+const LITE = (LOWMEM || QP0.has('lite') || QP0.has('ultra')) && !QP0.has('full');
+// crash breadcrumbs: the current heavy stage is written before it starts; a page load that finds an unfinished heavy stage
+// (renderer crash -> "앗, 이런!" -> reload / relaunch) switches this device to ultra-lite for two weeks (?full resets it)
+const HEAVY = ['models', 'camera', 'capture', 'analysis', 'preview', 'live'];
+let crashedAt = null;
+try {
+  const c = JSON.parse(localStorage.getItem('pcCrumb') || 'null');
+  if (c && !c.ok && HEAVY.includes(c.s) && Date.now() - c.t < 30 * 60e3) { crashedAt = c.s; localStorage.setItem('pcUltra', String(Date.now())); }
+  if (QP0.has('full')) localStorage.removeItem('pcUltra');
+} catch (e) {}
+const ULTRA = !QP0.has('full') && (QP0.has('ultra') || (() => { try { const u = +localStorage.getItem('pcUltra'); return !!u && Date.now() - u < 14 * 864e5; } catch (e) { return false; } })());
+const MARKS = []; const mark = (s) => { if (MARKS.length > 200) MARKS.shift(); MARKS.push([s, Date.now()]); };
+function crumb(s, ok) { mark(s + (ok ? ':ok' : '')); try { localStorage.setItem('pcCrumb', JSON.stringify({ s, ok: !!ok, t: Date.now() })); sessionStorage.setItem('pcStage', s + (ok ? ':ok' : '')); } catch (e) {} }
+// a normal close / app switch is not a crash
+addEventListener('pagehide', () => { try { const c = JSON.parse(localStorage.getItem('pcCrumb') || 'null'); if (c && !c.ok) crumb(c.s, true); } catch (e) {} });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') { try { const c = JSON.parse(localStorage.getItem('pcCrumb') || 'null'); if (c && !c.ok) crumb(c.s, true); } catch (e) {} } });
+crumb('boot', true);
 const freeCanvas = (c) => { if (c && c.getContext) { c.width = c.height = 0; } };
 const TYPES = {
   spring: { n: '봄 웜', e: '🌸', bg: 'var(--spring)', worst: 'winter', warm: true,
@@ -103,6 +121,8 @@ let lm = null;        // landmarks (key points + oval) in raw pixel coords
 let hairMask = null;  // {id, meanY, meanRGB, bbox, ...} + seg extras (fill, neck)
 const stats = { fps: 0, detMs: 0, segMs: 0, renderMs: 0, hairMs: 0, glassMs: 0, segEvery: 2, delegate: '', lastFps: [] };
 window.__pc = { S, stats, get lm() { return lm; }, get hairMask() { return hairMask; }, get origHex() { return origHex; }, render: () => renderStill() };
+window.__pc.marks = MARKS; window.__pc.mark = mark;
+window.__pc.flags = { IS_ANDROID, LOWMEM, LITE, ULTRA, get crashedAt() { return crashedAt; }, dpr: devicePixelRatio, deviceMemory: navigator.deviceMemory };
 window.__pc.dbg = () => ({ photoCache, colorCache, cur: currentStyle() });
 if (new URLSearchParams(location.search).has('proc')) { S.procGlasses = true; S.procHair = true; }
 Object.defineProperty(window.__pc, 'outC', { get: () => outC });
@@ -154,6 +174,7 @@ function extractLm(res, W, H, t) {
 
 /* ------------------------------------------------------------------ models */
 async function loadModels() {
+  crumb('models');
   setStatus('얼굴 인식 모델 불러오는 중…');
   MP = await import(MP_URL);
   const files = await MP.FilesetResolver.forVisionTasks(WASM_URL);
@@ -166,6 +187,7 @@ async function loadModels() {
   try { if (forceCPU) throw 0; face = await mkFace('GPU'); seg = await mkSeg('GPU'); delegate = 'GPU'; }
   catch (e) { console.warn('GPU delegate failed, using CPU', e); face = face || await mkFace('CPU'); seg = await mkSeg('CPU'); delegate = 'CPU'; }
   faceMode = segMode = 'VIDEO'; stats.delegate = delegate;
+  crumb('models', true);
 }
 async function ensureMode(m) {
   if (faceMode !== m) { await face.setOptions({ runningMode: m }); faceMode = m; }
@@ -460,7 +482,8 @@ function photoStyle(id, bang) {
   const ent = (photoCache[key] = { ready: false });
   const img = new Image();
   img.onload = () => {
-    const st0 = STYLES.find((q) => q.id === id), TW = 1080, TH = 1332;
+    mark('hair-img-loaded');
+    const st0 = STYLES.find((q) => q.id === id), TW = LITE ? 540 : 1080, TH = LITE ? 666 : 1332; // canonical template space is 1080x1332; lite works at half
     const c = mk(TW, TH), x = c.getContext('2d', { willReadFrequently: true }); x.imageSmoothingQuality = 'high'; x.drawImage(img, 0, 0, TW, TH);
     const src = x.getImageData(0, 0, TW, TH).data, bk = new ImageData(TW, TH), fr = new ImageData(TW, TH); let fsum = 0;
     for (let i = 0; i < src.length; i += 4) {
@@ -472,13 +495,13 @@ function photoStyle(id, bang) {
     let front = null; if (fsum > 255 * 400) { front = mk(TW, TH); front.getContext('2d').putImageData(fr, 0, 0); }
     // underlay: a blurred, dilated copy of the hair next to the face (temples/sides/jaw), drawn darker underneath, so no skin/background
     // gap can open between the hair's inner edge and the customer's face oval (the oval occluder covers it where the face is)
-    const q = 4, uw = TW / q, uh = TH / q, u = mk(uw, uh), ux = u.getContext('2d', { willReadFrequently: true });
+    const q = 4 * TW / 1080, uw = 270, uh = 333, u = mk(uw, uh), ux = u.getContext('2d', { willReadFrequently: true });
     const all = mk(TW, TH); all.getContext('2d').drawImage(img, 0, 0, TW, TH);
     { const ax = all.getContext('2d'); const d = ax.getImageData(0, 0, TW, TH); for (let i = 0; i < d.data.length; i += 4) d.data[i + 1] = 128; ax.putImageData(d, 0, 0); }
     ux.filter = 'blur(12px)'; ux.drawImage(all, 0, 0, uw, uh); ux.filter = 'none';
     const ud = ux.getImageData(0, 0, uw, uh);
     for (let y = 0; y < uh; y++) for (let x = 0; x < uw; x++) {
-      const i = (y * uw + x) * 4, cx = -3 + (x + 0.5) * q / 180, cy = -2.8 + (y + 0.5) * q / 180, ax2 = Math.abs(cx);
+      const i = (y * uw + x) * 4, cx = -3 + (x + 0.5) * 4 / 180, cy = -2.8 + (y + 0.5) * 4 / 180, ax2 = Math.abs(cx);
       const side = clamp((ax2 - (cy < -0.35 ? 0.58 : 0.42)) / 0.12, 0, 1), low = clamp((cy + 0.35) / 0.15, 0, 1), ex = cx / 1.18, ey = (cy - 0.15) / 1.5, band = clamp((1 - (ex * ex + ey * ey)) / 0.12, 0, 1);
       const a = ud.data[i + 3]; if (a) { const inv = 255 / a; ud.data[i] = Math.min(255, ud.data[i]); }
       const tz = clamp((ax2 - 0.5) / 0.15, 0, 1) * clamp((1.05 - ax2) / 0.1, 0, 1) * clamp((cy + 1.4) / 0.15, 0, 1) * clamp((-0.4 - cy) / 0.2, 0, 1); // upper temples
@@ -494,7 +517,7 @@ function photoStyle(id, bang) {
     if (S.style === id) rerender();
   };
   img.onerror = () => { ent.failed = true; };
-  img.src = new URL('./assets/hair/' + file, import.meta.url).href;
+  img.src = new URL('./assets/hair/' + (LITE ? 'lo/' : '') + file, import.meta.url).href;
   return 'loading';
 }
 function currentStyle() {
@@ -560,8 +583,8 @@ function compose(W, H, P, mask) {
     }
     const col = coloredStyle(st), T = templateTransform(HA);
     outX.drawImage(baseC, 0, 0);
-    if (col.under && !S.dbgNoUnder) { outX.save(); outX.setTransform(...T); outX.filter = st.g === 'm' ? 'brightness(0.8) blur(2px)' : 'brightness(0.7)'; outX.drawImage(col.under, 0, 0, 1080, 1332); outX.restore(); }
-    if (!S.dbgNoBack) { outX.save(); outX.setTransform(...T); outX.imageSmoothingQuality = 'high'; outX.drawImage(col.back, 0, 0); outX.restore(); }
+    if (col.under && !S.dbgNoUnder) { outX.save(); outX.setTransform(...T); outX.filter = st.g === 'm' ? (LITE ? 'brightness(0.8)' : 'brightness(0.8) blur(2px)') : 'brightness(0.7)'; outX.drawImage(col.under, 0, 0, 1080, 1332); outX.restore(); }
+    if (!S.dbgNoBack) { outX.save(); outX.setTransform(...T); outX.imageSmoothingQuality = 'high'; outX.drawImage(col.back, 0, 0, 1080, 1332); outX.restore(); }
     // occluder = face oval (+ neck) from the hair-free base image
     const ow = Math.round(W / 4), oh = Math.round(H / 4);
     ensure(occ2, ow, oh); occ2X.globalCompositeOperation = 'source-over'; occ2X.clearRect(0, 0, ow, oh);
@@ -602,10 +625,10 @@ function compose(W, H, P, mask) {
       const sw3 = Math.round(W / 6), sh3 = Math.round(H / 6); ensure(cshC2, sw3, sh3);
       cshX2.globalCompositeOperation = 'source-over'; cshX2.clearRect(0, 0, sw3, sh3);
       cshX2.setTransform(...T.map((v, i) => v * (i % 2 === 0 ? sw3 / W : sh3 / H)));
-      cshX2.drawImage(col.front, 0, 0); cshX2.setTransform(1, 0, 0, 1, 0, 0);
+      cshX2.drawImage(col.front, 0, 0, 1080, 1332); cshX2.setTransform(1, 0, 0, 1, 0, 0);
       cshX2.globalCompositeOperation = 'source-in'; cshX2.fillStyle = 'rgb(30,15,10)'; cshX2.fillRect(0, 0, sw3, sh3);
       outX.save(); outX.globalAlpha = st.photo ? 0.16 : 0.3; outX.drawImage(cshC2, 0, fh * (st.photo ? 0.012 : 0.025), W, H); outX.restore();
-      outX.save(); outX.setTransform(...T); outX.drawImage(col.front, 0, 0); outX.restore();
+      outX.save(); outX.setTransform(...T); outX.drawImage(col.front, 0, 0, 1080, 1332); outX.restore();
     }
   } else {
     outX.drawImage(rawC, 0, 0);
@@ -647,7 +670,7 @@ function glassesPass(outX, W, H, P) {
 let hiScale = 1;
 const paneC = mk(), paneX = paneC.getContext('2d');
 function calcHiScale(W, H) {
-  if (S.noHiGlasses || !stage.clientWidth) return 1;
+  if (S.noHiGlasses || LITE || !stage.clientWidth) return 1;
   const tw = S.compare === 'split' ? W * 2 : W, fit = Math.min(stage.clientWidth / tw, stage.clientHeight / H) * (window.devicePixelRatio || 1);
   let s = Math.min(LOWMEM ? 1.5 : 2.5, Math.max(1, fit), (LOWMEM ? 1800 : 2600) / Math.max(tw, H));
   s = Math.round(s * 4) / 4; return s < 1.2 ? 1 : s;
@@ -683,8 +706,42 @@ function present(target = view, labels = true) {
   if (split) { x.fillStyle = '#fff'; x.fillRect(W - 2, 0, 4, H); }
 }
 
+
+/* ------------------------------------------------------------------ camera frame grabber (lite) */
+// Every drawImage(video) leaves a decoded copy of that frame in Chrome's image-decode cache (measured: ~340 MB per tab on an
+// 8 GB device profile within seconds). VideoFrame.copyTo + putImageData bypasses that cache, so on lite devices all camera
+// pixels come from this one reused canvas. Falls back to drawImage(video) if the API is missing or the frame is rotated.
+const vidC = mk(), vidX = vidC.getContext('2d', { willReadFrequently: true });
+const vg = { on: false, seq: 0, busy: false, img: null, cb: 0, ok: LITE && typeof VideoFrame === 'function' && !!VideoFrame.prototype.copyTo && !QP0.has('nograb') };
+function grabStart() {
+  if (!vg.ok || vg.on || !video.requestVideoFrameCallback) return; vg.on = true; vg.seq = 0;
+  const step = async () => {
+    if (!vg.on) return;
+    if (!vg.busy && video.readyState >= 2 && video.videoWidth) {
+      vg.busy = true; let f = null;
+      try {
+        f = new VideoFrame(video); const r = f.visibleRect, w = r.width, h = r.height;
+        if ((f.rotation || 0) !== 0 || f.flip || (video.videoWidth !== video.videoHeight && (w > h) !== (video.videoWidth > video.videoHeight))) throw new Error('rotated frame');
+        if (!vg.img || vg.img.width !== w || vg.img.height !== h) { vg.img = new ImageData(w, h); vidC.width = w; vidC.height = h; }
+        await f.copyTo(vg.img.data, { format: 'RGBA', rect: { x: r.x, y: r.y, width: w, height: h }, layout: [{ offset: 0, stride: w * 4 }] });
+        if (vg.on) { vidX.putImageData(vg.img, 0, 0); vg.seq++; }
+      } catch (e) { console.warn('frame grabber off, using drawImage(video)', e); vg.ok = false; vg.on = false; vg.seq = 0; }
+      finally { if (f) { try { f.close(); } catch (e) {} } vg.busy = false; }
+    }
+    if (vg.on) vg.cb = video.requestVideoFrameCallback(step);
+  };
+  vg.cb = video.requestVideoFrameCallback(step);
+}
+function grabStop() { vg.on = false; if (vg.cb && video.cancelVideoFrameCallback) video.cancelVideoFrameCallback(vg.cb); vg.cb = 0; vg.seq = 0; vg.img = null; vidC.width = vidC.height = 1; }
+// current camera image source + its size; null while the grabber has no frame yet (avoids drawing the <video> at all)
+function camSrc() {
+  if (vg.on) return vg.seq > 0 ? [vidC, vidC.width, vidC.height] : null;
+  return video.videoWidth ? [video, video.videoWidth, video.videoHeight] : null;
+}
+window.__pc.grab = vg;
+
 /* ------------------------------------------------------------------ live mode */
-const LIVE_CAP = +(new URLSearchParams(location.search).get('res') || 800);
+const LIVE_CAP = +(new URLSearchParams(location.search).get('res') || (ULTRA ? 480 : LITE ? 640 : 800));
 let frameNo = 0, fpsT0 = 0, fpsN = 0, liveErr = 0;
 function liveSize() { const vw = video.videoWidth, vh = video.videoHeight, s = Math.min(1, LIVE_CAP / Math.max(vw, vh)); return [Math.round(vw * s), Math.round(vh * s)]; }
 function liveLoop() {
@@ -692,14 +749,15 @@ function liveLoop() {
   if (S.mode !== 'live' || switching || video.readyState < 2 || !video.videoWidth) return;
   const t0 = performance.now(), [W, H] = liveSize();
   if (rawC.width !== W || rawC.height !== H) { rawC.width = W; rawC.height = H; hairMask = null; }
-  rawX.drawImage(video, 0, 0, W, H);
-  try { const r = face.detectForVideo(video, t0); const p = extractLm(r, W, H, t0); if (!p) resetFilters(); lm = p; liveErr = 0; } catch (e) { console.warn(e); if (++liveErr >= 3 && delegate === 'GPU' && !switching) switchToCPU(); }
+  const cs = camSrc(); if (!cs) return;
+  rawX.drawImage(cs[0], 0, 0, W, H);
+  try { const r = face.detectForVideo(LITE ? rawC : video, vts()); const p = extractLm(r, W, H, t0); if (!p) resetFilters(); lm = p; liveErr = 0; } catch (e) { console.warn(e); if (++liveErr >= 3 && delegate === 'GPU' && !switching) switchToCPU(); }
   const t1 = performance.now(); stats.detMs = stats.detMs * 0.9 + (t1 - t0) * 0.1;
   frameNo++;
   const needSeg = S.hair || S.style !== 'none';
   if (needSeg && frameNo % stats.segEvery === 0) {
     segInputFrom(rawC, W, H, 256);
-    try { seg.segmentForVideo(segIn, t0, (res) => { const ti = performance.now(); stats.inferMs = ti - t1; const m = takeMasks(res); stats.takeMs = performance.now() - ti; if (m) hairMask = buildSeg(m.masks, m.w, m.h, hairMask, lm); stats.postMs = performance.now() - ti; }); } catch (e) { console.warn(e); if (++liveErr >= 3 && delegate === 'GPU' && !switching) switchToCPU(); }
+    try { seg.segmentForVideo(segIn, vts(), (res) => { const ti = performance.now(); stats.inferMs = ti - t1; const m = takeMasks(res); stats.takeMs = performance.now() - ti; if (m) hairMask = buildSeg(m.masks, m.w, m.h, hairMask, lm); stats.postMs = performance.now() - ti; }); } catch (e) { console.warn(e); if (++liveErr >= 3 && delegate === 'GPU' && !switching) switchToCPU(); }
     stats.segMs = stats.segMs * 0.8 + (performance.now() - t1) * 0.2;
   }
   const t2 = performance.now();
@@ -716,9 +774,10 @@ function liveLoop() {
 }
 async function startCamera() {
   if (!navigator.mediaDevices?.getUserMedia) throw new Error(window.isSecureContext ? '이 브라우저는 카메라를 지원하지 않아요' : 'HTTPS 주소에서만 카메라를 쓸 수 있어요');
-  if (stream) stream.getTracks().forEach((t) => t.stop());
-  stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: S.facing, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } } });
-  video.srcObject = stream; await video.play();
+  grabStop(); if (stream) stream.getTracks().forEach((t) => t.stop());
+  crumb('camera');
+  stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: LITE ? { facingMode: S.facing, width: { ideal: 640, max: 960 }, height: { ideal: 480, max: 720 }, frameRate: { ideal: 24, max: 30 } } : { facingMode: S.facing, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } } });
+  video.srcObject = stream; await video.play(); grabStart();
   const st = stream.getVideoTracks()[0].getSettings(); mirror = (st.facingMode || S.facing) !== 'environment'; cameraOK = true;
 }
 async function goLive() {
@@ -726,7 +785,7 @@ async function goLive() {
   try {
     if (!cameraOK) await startCamera();
     await ensureMode('VIDEO');
-    S.mode = 'live'; hairMask = null; lm = null; origHex = null; grainC = null; look = null; resetFilters();
+    crumb('live'); S.mode = 'live'; hairMask = null; lastStillMasks = null; // still-only data (masks) not needed live lm = null; origHex = null; grainC = null; look = null; resetFilters();
     stage.classList.remove('is-still', 'no-live'); $('placeholder').classList.add('hide');
     $('btnLive').classList.add('on'); $('btnPhoto').classList.remove('on');
     if (!liveRAF) liveLoop();
@@ -736,10 +795,16 @@ function stopLoop() { if (liveRAF) cancelAnimationFrame(liveRAF); liveRAF = 0; }
 
 /* ------------------------------------------------------------------ still (photo / captured) */
 let lastStillMasks = null;
+// strictly increasing timestamps shared by the live loop and lite still analysis (VIDEO-mode graphs)
+let vtsLast = 0; const vts = () => (vtsLast = Math.max(vtsLast + 1, performance.now()));
 async function analyzeStill(stepped) {
-  await ensureMode('IMAGE'); // same model instances, only the running mode changes (no second copy in memory)
+  // lite: stay in VIDEO mode (no graph rebuild = no transient double allocation); the tracker is re-seeded by repeated calls
+  if (!LITE) await ensureMode('IMAGE'); else await ensureMode('VIDEO'); // same model instances either way
   const W = rawC.width, H = rawC.height;
-  const r = face.detect(rawC);
+  let r;
+  if (LITE) { resetFilters(); for (let i = 0; i < 3; i++) { r = face.detectForVideo(rawC, vts()); if (i >= 1 && r.faceLandmarks && r.faceLandmarks.length) break; } }
+  else r = face.detect(rawC);
+  mark('face-done');
   lm = extractLm(r, W, H);
   window.__pc.rawLm = r.faceLandmarks && r.faceLandmarks[0] ? r.faceLandmarks[0].map((q) => [q.x * W, q.y * H]) : null;
   hairMask = null; lastStillMasks = null;
@@ -747,10 +812,10 @@ async function analyzeStill(stepped) {
   let m = null;
   try {
     segInputFrom(rawC, W, H, 640);
-    const res = seg.segment(segIn); m = takeMasks(res);
-    if (res && res.close) res.close();
+    if (LITE) seg.segmentForVideo(segIn, vts(), (res) => { m = takeMasks(res); });
+    else { const res = seg.segment(segIn); m = takeMasks(res); if (res && res.close) res.close(); }
     lastStillMasks = m;
-    if (m) hairMask = buildSeg(m.masks, m.w, m.h, null, lm);
+    mark('seg-done'); if (m) hairMask = buildSeg(m.masks, m.w, m.h, null, lm); mark('buildseg-done');
   } catch (e) { console.warn('hair segmentation failed, continuing without hair mask', e); hairMask = null; }
   window.__pc.lastAnalysis = { face: !!lm, hairCover: hairMask ? hairMask.cover : 0, W, H, maskW: m && m.w, maskH: m && m.h };
 }
@@ -766,18 +831,19 @@ async function loadStillFrom(src, sw, sh, mirrorIt, opt = {}) {
   rawC.width = Math.round(sw * s); rawC.height = Math.round(sh * s);
   rawX.drawImage(src, 0, 0, rawC.width, rawC.height);
   stage.classList.add('is-still'); $('placeholder').classList.add('hide');
+  crumb('analysis');
   if (!opt.quiet) { compose(rawC.width, rawC.height, null, null); present(); }
   setStatus('분석 중…'); $('fps').textContent = '';
   try { await analyzeStill(opt.quiet); } catch (e) { console.error(e); lm = null; if (!opt.quiet) toast('분석 중 오류가 났어요'); }
   setStatus(lm ? '✓ 얼굴 인식 완료' : '얼굴을 찾지 못했어요 (헤어 컬러만 적용)');
   if (opt.quiet) return;
   if (!lm) toast('얼굴을 찾지 못했어요. 정면 사진이 가장 잘 돼요.');
-  renderStill();
+  renderStill(); crumb('still', true);
 }
-async function capture() { if (S.mode !== 'live' || !video.videoWidth) return; await loadStillFrom(video, video.videoWidth, video.videoHeight, mirror); toast('촬영했어요! 저장하거나 컬러·스타일을 계속 바꿔보세요.'); }
+async function capture() { const cs = camSrc(); if (S.mode !== 'live' || !cs) return; await loadStillFrom(cs[0], cs[1], cs[2], mirror); toast('촬영했어요! 저장하거나 컬러·스타일을 계속 바꿔보세요.'); }
 // big camera photos (12-50 MP) would decode to 50-200 MB; decode straight to <= ~1600 px wide instead
 async function decodePhoto(file) {
-  if (file.size > 1.2e6) { try { return await createImageBitmap(file, { imageOrientation: 'from-image', resizeWidth: 1600, resizeQuality: 'high' }); } catch (e) { /* older engines: full decode */ } }
+  if (file.size > 1.2e6) { try { return await createImageBitmap(file, { imageOrientation: 'from-image', resizeWidth: LITE ? 1280 : 1600, resizeQuality: 'high' }); } catch (e) { /* older engines: full decode */ } }
   return createImageBitmap(file, { imageOrientation: 'from-image' });
 }
 async function loadFile(file) {
@@ -916,7 +982,7 @@ function bindUI() {
 
 /* ------------------------------------------------------------------ recommendation step (cover -> capture -> analysis -> result -> live) */
 const rc = { el: $('reco'), raf: 0, res: null, an: null, combos: [], cur: 0, sel: null, done: null, gender: 'f', busy: false, camWanted: false, gen: 0, q: Promise.resolve() };
-const RC_MAX = 1024; // analysis photo size (long side); also what the previews are cropped from
+const RC_MAX = ULTRA ? 640 : LITE ? 768 : 1024; // analysis photo size (long side); also what the previews are cropped from
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // let the browser paint (progress text) between heavy steps; setTimeout fallback when rAF is throttled
 const yieldUI = () => new Promise((r) => { let d = 0; const f = () => { if (!d) { d = 1; r(); } }; requestAnimationFrame(() => setTimeout(f, 0)); setTimeout(f, 150); });
@@ -924,18 +990,18 @@ function rcProgress(t) { const p = $('rcBusy') && $('rcBusy').querySelector('p')
 function rcShow(part) { for (const id of ['rcCap', 'rcBusy', 'rcRes']) $(id).hidden = id !== part; $('rcStep').textContent = part === 'rcRes' ? '추천 결과' : part === 'rcBusy' ? '분석 중' : '추천 진단'; }
 function rcPreviewLoop() {
   rc.raf = requestAnimationFrame(rcPreviewLoop);
-  if (!video.videoWidth) return; const c = $('rcVideo'), vw = video.videoWidth, vh = video.videoHeight;
-  const dpr = Math.min(devicePixelRatio || 1, LOWMEM ? 1.5 : 2);
+  const cs = camSrc(); if (!cs) return; const c = $('rcVideo'), vw = cs[1], vh = cs[2];
+  const dpr = LITE ? 1 : Math.min(devicePixelRatio || 1, 2);
   const cw = c.clientWidth * dpr, ch = c.clientHeight * dpr; if (!cw || !ch) return;
   if (c.width !== Math.round(cw) || c.height !== Math.round(ch)) { c.width = Math.round(cw); c.height = Math.round(ch); }
   const x = c.getContext('2d'), s = Math.max(c.width / vw, c.height / vh);
-  x.save(); if (mirror) { x.translate(c.width, 0); x.scale(-1, 1); } x.drawImage(video, (c.width - vw * s) / 2, (c.height - vh * s) / 2, vw * s, vh * s); x.restore();
+  x.save(); if (mirror) { x.translate(c.width, 0); x.scale(-1, 1); } x.drawImage(cs[0], (c.width - vw * s) / 2, (c.height - vh * s) / 2, vw * s, vh * s); x.restore();
 }
 function rcStopPreview() { if (rc.raf) cancelAnimationFrame(rc.raf); rc.raf = 0; }
 // camera + live loop off while analysing (frees the video decoder buffers and the per-frame model work)
 function rcReleaseCamera() {
   rcStopPreview(); stopLoop();
-  if (stream) stream.getTracks().forEach((t) => t.stop()); stream = null; cameraOK = false; video.srcObject = null;
+  grabStop(); if (stream) stream.getTracks().forEach((t) => t.stop()); stream = null; cameraOK = false; video.srcObject = null;
 }
 function rcFreeCanvases() {
   for (const c of $('rcThumbs').querySelectorAll('canvas')) freeCanvas(c);
@@ -948,8 +1014,9 @@ async function rcBackToCapture() {
   if (cameraOK && !rc.raf) rcPreviewLoop();
 }
 function recoFlow() { // resolves with 'live' | 'skip'
+  if (crashedAt && !rc.noticed) { rc.noticed = true; toast('이전 실행에서 메모리가 부족했어요. 이 기기에서는 가벼운 모드로 진행할게요.', 5000); }
   rc.el.hidden = false; document.body.classList.add('reco-on'); rcShow('rcCap'); rc.gender = S.gender || 'f'; rc.camWanted = cameraOK;
-  $('rcShot').disabled = !cameraOK; $('rcHint').textContent = cameraOK ? '정면을 바라봐 주세요' : '카메라를 쓸 수 없어요 · 사진을 올려 주세요';
+  $('rcShot').disabled = !cameraOK; $('rcHint').textContent = (cameraOK ? '정면을 바라봐 주세요' : '카메라를 쓸 수 없어요 · 사진을 올려 주세요') + (ULTRA ? ' · 가벼운 모드' : '');
   if (cameraOK) rcPreviewLoop();
   return new Promise((r) => { rc.done = r; });
 }
@@ -964,6 +1031,7 @@ async function rcAnalyze(src, sw, sh, mir, bmp) {
   let snap = null;
   try {
     // 1) freeze the frame at analysis size, then release camera / live loop before any model work
+    crumb('capture');
     const s = Math.min(1, RC_MAX / Math.max(sw, sh));
     snap = document.createElement('canvas'); snap.width = Math.max(1, Math.round(sw * s)); snap.height = Math.max(1, Math.round(sh * s));
     const sx = snap.getContext('2d'); sx.imageSmoothingQuality = 'high'; sx.drawImage(src, 0, 0, snap.width, snap.height);
@@ -971,7 +1039,7 @@ async function rcAnalyze(src, sw, sh, mir, bmp) {
     rcReleaseCamera(); window.__pc.rcCamReleased = (window.__pc.rcCamReleased || 0) + 1;
     await yieldUI();
     // 2) face landmarks + hair segmentation (same model instances, IMAGE mode)
-    rcProgress('얼굴형을 분석하는 중…'); await yieldUI();
+    rcProgress('얼굴형을 분석하는 중…'); await yieldUI(); crumb('analysis');
     Object.assign(S, { style: 'none', bang: null, hair: null, shape: 'none' });
     await loadStillFrom(snap, snap.width, snap.height, mir, { cap: RC_MAX, quiet: true });
     freeCanvas(snap); snap = null;
@@ -985,12 +1053,12 @@ async function rcAnalyze(src, sw, sh, mir, bmp) {
     try { const img = rawX.getImageData(0, 0, rawC.width, rawC.height); cm = colorMetrics(img, rawC.width, rawC.height, p, hairMask && hairMask.meanRGB); cc = classifyColor(cm); }
     catch (e) { console.warn('colour analysis failed', e); }
     if (!cc || !TYPES[cc.type]) { const t = TYPES[S.type] ? S.type : 'spring'; cc = { type: t, sub: TYPES[t].subs[0][0], warm: TYPES[t].warm ? 1 : -1, conf: 0 }; }
-    rc.an = { fm, fc, cm, cc, type: cc.type, sub: cc.sub };
+    mark('color-done'); rc.an = { fm, fc, cm, cc, type: cc.type, sub: cc.sub };
     window.__pc.reco = rc;
     // 4) results: text first, then the #1 preview, then (full mode) small thumbnails one by one
     rcProgress('추천 스타일을 그리는 중…'); await yieldUI();
     await rcBuild();
-    rcShow('rcRes');
+    rcShow('rcRes'); crumb('results', true);
     rcThumbsLazy();
   } catch (e) { console.error(e); toast('분석 중 오류가 났어요. 다시 찍어 주세요.'); await rcBackToCapture(); }
   finally { if (snap) freeCanvas(snap); rc.busy = false; }
@@ -1002,30 +1070,34 @@ async function rcBuild() {
   rc.sel = { ...rc.combos[0] }; rc.cur = 0;
   rcRenderText();
   const th = $('rcThumbs'); for (const c of th.querySelectorAll('canvas')) freeCanvas(c);
+  rc.el.classList.toggle('ultra', ULTRA);
+  if (ULTRA) { th.innerHTML = ''; return; } // ultra-lite: text-only results, no preview rendering at all
   th.classList.toggle('lite', LITE);
   th.innerHTML = rc.combos.map((c, i) => `<button class="rc-th ${i === 0 ? 'on' : ''}" data-i="${i}">${LITE ? `<i class="rc-sw" style="background:${c.c.hair.c}"></i>` : '<canvas></canvas>'}<span>추천 ${i + 1}${LITE ? ' · ' + c.c.hair.n : ''}</span></button>`).join('');
   await rcQueue(() => rcRender(rc.sel, $('rcMain'), 'main'), gen);
 }
 function rcThumbsLazy() {
-  if (LITE) return; const gen = rc.gen, th = $('rcThumbs');
+  if (LITE || ULTRA) return; const gen = rc.gen, th = $('rcThumbs');
   rc.combos.forEach((cb, i) => rcQueue(async () => { await yieldUI(); const b = th.children[i]; if (b) await rcRender(cb, b.querySelector('canvas'), 'thumb'); }, gen));
 }
 async function rcRender(cb, canvas, kind) {
-  if (!canvas || !lm || S.mode !== 'still') return;
+  if (ULTRA || !canvas || !lm || S.mode !== 'still') return;
+  crumb('preview');
   const was = S.style, wasBang = S.bang;
   Object.assign(S, { type: rc.an.type, sub: rc.an.sub, gender: rc.gender, style: cb.h.style, bang: cb.h.bang, hair: cb.c.hair, shape: cb.g.shape, frame: cb.g.frame, noHiGlasses: true, compare: 'after', holdBefore: false });
   try {
     for (let t = 0; t < 120 && S.style !== 'none' && !currentStyle(); t++) await sleep(50); // hair asset decode (bounded)
+    mark('style-ready');
     if (S.shape !== 'none') await preloadGlasses3D(S.shape, S.frame); // decode once, then a single compose
-    if (!lm) return;
+    mark('assets-ready'); if (!lm) return;
     if (was !== S.style || wasBang !== S.bang || !hairMask || !hairMask.fill) rebuildStillSeg();
-    compose(rawC.width, rawC.height, lm, hairMask);
+    mark('reseg-done'); compose(rawC.width, rawC.height, lm, hairMask); mark('compose-done');
   } finally { S.noHiGlasses = false; }
   const fh = Math.hypot(lm.chin.x - lm.top.x, lm.chin.y - lm.top.y); let cx = (lm.top.x + lm.chin.x) / 2, cy = (lm.top.y + lm.chin.y) / 2 - fh * 0.12;
   const ar = kind === 'main' ? 0.8 : 1; let hh = Math.min(fh * (kind === 'main' ? 2.3 : 1.85), outC.height), ww = hh * ar;
   if (ww > outC.width) { ww = outC.width; hh = ww / ar; }
   cx = clamp(cx, ww / 2, outC.width - ww / 2); cy = clamp(cy, hh / 2, outC.height - hh / 2);
-  const dpr = devicePixelRatio || 1, maxW = kind === 'main' ? (LITE ? 720 : 1024) : 240;
+  const dpr = devicePixelRatio || 1, maxW = kind === 'main' ? (LITE ? 600 : 1024) : 240;
   const cw = Math.max(32, Math.min(maxW, Math.round((canvas.clientWidth || (kind === 'main' ? 480 : 120)) * dpr)));
   if (canvas.width !== cw) canvas.width = cw; const chh = Math.round(cw / ar); if (canvas.height !== chh) canvas.height = chh;
   const x = canvas.getContext('2d'); x.imageSmoothingQuality = 'high'; x.fillStyle = '#eee9e2'; x.fillRect(0, 0, canvas.width, canvas.height);
@@ -1036,12 +1108,13 @@ async function rcRender(cb, canvas, kind) {
   if (bx > ax && by > ay) x.drawImage(outC, ax, ay, bx - ax, by - ay, (ax - X0) * k, (ay - Y0) * k, (bx - ax) * k, (by - ay) * k);
   x.restore();
   window.__pc.rcRenders = (window.__pc.rcRenders || 0) + 1;
+  crumb('results', true);
 }
 const FACE_WHY = { oval: '이마·광대·턱의 폭과 길이 비율이 고르게 균형 잡힌 얼굴형', round: '얼굴 길이가 짧고 턱선이 부드러운 곡선형', square: '턱 끝 폭이 넓고 턱 각이 또렷한 얼굴형', long: '얼굴 폭에 비해 세로 길이가 긴 얼굴형', heart: '이마가 넓고 턱으로 갈수록 좁아지는 얼굴형', diamond: '광대가 가장 넓고 이마·턱이 좁은 얼굴형' };
 function rcRenderText() {
   const a = rc.an, T = TYPES[a.type], subN = T.subs.find((q) => q[0] === a.sub)?.[1] || '', est = TYPES[a.cc.type];
   const tone = a.cc.warm >= 0 ? '웜' : '쿨', conf = a.cc.conf > 0.6 ? '뚜렷함' : a.cc.conf > 0.25 ? '보통' : '경계(직접 확인 권장)';
-  $('rcSum').innerHTML = `<div class="rc-chip"><small>얼굴형</small><b>${SHAPES_KO[a.fc.shape]}</b><span>${FACE_WHY[a.fc.shape]}</span></div>
+  $('rcSum').innerHTML = (ULTRA ? '<p class="rc-note">가벼운 모드: 미리보기 이미지는 생략돼요. 「실시간 테스트 시작」에서 바로 확인할 수 있어요.</p>' : '') + `<div class="rc-chip"><small>얼굴형</small><b>${SHAPES_KO[a.fc.shape]}</b><span>${FACE_WHY[a.fc.shape]}</span></div>
     <div class="rc-chip"><small>퍼스널컬러 ${a.type === a.cc.type && a.sub === a.cc.sub ? '추정' : '선택'}</small><b>${T.n} ${subN}</b><span>분석 추정: ${est.n} · 언더톤 ${tone} (${conf})</span></div>`;
   $('rcTypes').innerHTML = Object.entries(TYPES).map(([k, t]) => `<button class="${a.type === k ? 'on' : ''}" data-type="${k}">${t.n}</button>`).join('');
   $('rcSubs').innerHTML = T.subs.map(([k, n]) => `<button class="${a.sub === k ? 'on' : ''}" data-sub="${k}">${n}</button>`).join('');
@@ -1055,7 +1128,7 @@ async function rcSelect(next) { rc.sel = next; rcRenderText(); const sel = next;
 function rcBind() {
   if (!rc.el || !$('rcShot')) return; // stale cached index.html from an older version: no reco step
   $('rcSkip').onclick = () => rcClose('skip');
-  $('rcShot').onclick = () => { if (cameraOK && video.videoWidth) rcAnalyze(video, video.videoWidth, video.videoHeight, mirror); };
+  $('rcShot').onclick = () => { const cs = camSrc(); if (cameraOK && cs) rcAnalyze(cs[0], cs[1], cs[2], mirror); };
   $('rcFile').onchange = async (e) => { const f = e.target.files[0]; e.target.value = ''; if (!f || rc.busy) return; try { const bmp = await decodePhoto(f); rcAnalyze(bmp, bmp.width, bmp.height, false, bmp); } catch (er) { toast('사진을 열 수 없어요'); } };
   $('rcRetake').onclick = () => { if (!rc.busy) rcBackToCapture(); };
   $('rcThumbs').onclick = (e) => { const b = e.target.closest('[data-i]'); if (!b || rc.busy) return; [...$('rcThumbs').children].forEach((q) => q.classList.toggle('on', q === b)); rcSelect({ ...rc.combos[+b.dataset.i] }); };
@@ -1078,17 +1151,24 @@ const S0 = { ...S };
 let modelsReady = false, modelsFailed = false, coverResolve = null;
 const coverEl = $('cover');
 function coverLoad(t) { const e = $('cvLoad'); if (e) e.textContent = t; }
+function purgeStillCaches() { // next customer: drop all decoded / colourised hair and glasses layers
+  for (const k in colorCache) { const e = colorCache[k]; if (e) { freeCanvas(e.back); freeCanvas(e.front); freeCanvas(e.under); } delete colorCache[k]; }
+  for (const k in photoCache) { const v = photoCache[k]; if (v && v.ready) { freeCanvas(v.st.back); freeCanvas(v.st.front); freeCanvas(v.st.under); } delete photoCache[k]; }
+  try { purgeGlasses3D(); } catch (e) {}
+  for (const c of [baseC, occFC, fillC, grainL, glassC, lensC, tintC, paneC, segIn]) { c.width = c.height = 1; }
+}
 function showCover() {
   stopLoop();
-  if (stream) stream.getTracks().forEach((t) => t.stop()); stream = null; cameraOK = false; video.srcObject = null;
+  grabStop(); if (stream) stream.getTracks().forEach((t) => t.stop()); stream = null; cameraOK = false; video.srcObject = null;
   // fresh session for the next customer: default selections, no photo left on screen
+  purgeStillCaches();
   Object.assign(S, S0, { mode: 'still' }); hairMask = null; lm = null; origHex = null; grainC = null; look = null; lastStillMasks = null;
   rawC.width = rawC.height = 1; outC.width = outC.height = 1; const vx = view.getContext('2d'); vx.clearRect(0, 0, view.width, view.height);
   stage.classList.remove('is-still'); $('placeholder').classList.remove('hide'); $('phText').textContent = '카메라를 준비하는 중…';
   $('intensity').value = 75; $('intensityVal').textContent = '75%'; $('gSize').value = 100; $('gSizeVal').textContent = '100%'; $('worstToggle').checked = false;
   renderTypes(); renderHair(); renderFrames(); renderShapes(); renderStyles(); setStatus(''); $('fps').textContent = '';
   coverEl.classList.remove('hide'); coverEl.hidden = false; document.body.classList.add('cover-on'); scrollTo(0, 0);
-  coverLoad(modelsReady ? '' : '준비 중…');
+  coverLoad(modelsReady ? '' : '준비 중…'); crumb('cover', true);
   return new Promise((r) => { coverResolve = r; });
 }
 function hideCover() {

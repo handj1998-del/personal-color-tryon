@@ -220,3 +220,5 @@ body.reco-on{overflow:hidden}
 .rc-actions{display:flex;gap:10px;margin-top:14px;position:sticky;bottom:0;background:linear-gradient(#faf8f400,#faf8f4 30%);padding:12px 0 4px}
 .rc-btn{flex:1;border-radius:999px;padding:14px 18px;font-size:15px;font-weight:600;border:1px solid #2b2a28;background:#2b2a28;color:#faf8f4;cursor:pointer}
 .rc-btn.ghost{background:transparent;color:#2b2a28;flex:0 0 auto}
+.reco.ultra #rcMain,.reco.ultra #rcThumbs{display:none}
+.rc-note{margin:0 0 10px;padding:10px 14px;border-radius:12px;background:#f1ece4;color:#5e5a54;font-size:13px;line-height:1.5;grid-column:1/-1}

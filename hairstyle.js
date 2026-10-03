@@ -298,7 +298,8 @@ export function colorize(src, hex, lutFn, opts = {}) {
   const con = tl > 110 ? 0.62 : tl > 70 ? 0.78 : 0.95;
   const conP = opts.photo ? (tl > 110 ? 0.95 : tl > 70 ? 1.1 : 1.2) : con;   // light colours: less strand contrast (no streaks)
   const light = opts.light || 0, expo = opts.expo || 1, sk = opts.skin || [150, 115, 95];
-  const colF = new Float32Array(TW); for (let u = 0; u < TW; u++) { const xc = Math.max(-1, Math.min(1, (X0 + u / SC) / 1.4)); colF[u] = expo * (1 + light * 0.24 * xc); }
+  const CW = c.width, ks = TW / CW; // template px per source px (low-res / quarter-res layers)
+  const colF = new Float32Array(CW); for (let u = 0; u < CW; u++) { const xc = Math.max(-1, Math.min(1, (X0 + u * ks / SC) / 1.4)); colF[u] = expo * (1 + light * 0.24 * xc); }
   for (let i = 0, p = 0; i < d.length; i += 4, p++) {
     if (!d[i + 3]) continue;
     const L = Math.max(0, Math.min(255, Math.round(112 + (d[i] - 112) * conP))), j = L * 3;
@@ -306,7 +307,7 @@ export function colorize(src, hex, lutFn, opts = {}) {
     const k = (d[i + 1] - 128) / 128;
     if (k > 0) { r += (r * 0.3 + 22 - r * 0.0) * k * 0.55; g += (g * 0.26 + 16) * k * 0.55; b += (b * 0.18 + 8) * k * 0.55; }
     else { const m = 1 + k * 0.28; r *= m; g *= m; b *= m; }
-    const f = colF[p % TW]; r *= f; g *= f; b *= f;
+    const f = colF[p % CW]; r *= f; g *= f; b *= f;
     const w = d[i + 2] / 255;
     if (w > 0.02) { r = r * (1 - w) + sk[0] * 0.8 * f * w; g = g * (1 - w) + sk[1] * 0.78 * f * w; b = b * (1 - w) + sk[2] * 0.78 * f * w; }
     d[i] = r; d[i + 1] = g; d[i + 2] = b;

@@ -6,8 +6,10 @@ const BASE = new URL('./assets/glasses/', import.meta.url).href;
 let manifest = null, onReady = null;
 const imgs = {}, colCache = new Map();
 // Android / low-memory: work at half the asset resolution (still >= the old 1x renders) and keep fewer colourised variants
-const LOW = /Android/i.test(navigator.userAgent) || (navigator.deviceMemory && navigator.deviceMemory <= 4);
-const SCALE = LOW ? 0.5 : 1, MAXC = LOW ? 3 : 8;
+const LOW = (/Android/i.test(navigator.userAgent) || /android/i.test(navigator.userAgentData?.platform || '') || /^android-app:/.test(document.referrer) || (navigator.deviceMemory && navigator.deviceMemory <= 4) || /[?&](lite|ultra)\b/.test(location.search)) && !/[?&]full\b/.test(location.search);
+// Android / low-memory: load the 1x files (assets/glasses/lo, 800x416) so no 1600x832 image is ever decoded; work at file resolution
+const FILEK = LOW ? 0.5 : 1, IMG_BASE = LOW ? BASE + 'lo/' : BASE;
+const SCALE = 1, MAXC = LOW ? 2 : 8;
 export function initGlasses3D(cb) {
   onReady = cb;
   fetch(BASE + 'glasses.json').then((r) => r.json()).then((m) => { manifest = m; cb && cb(); }).catch(() => {});
@@ -18,7 +20,7 @@ function load(fn) {
   const img = new Image(); imgs[fn] = { img, ok: false };
   img.onload = () => { imgs[fn].ok = true; onReady && onReady(); };
   img.onerror = () => { imgs[fn].err = true; };
-  img.src = BASE + fn; return null;
+  img.decoding = 'async'; img.src = IMG_BASE + fn; return null;
 }
 function scaled(img) {
   const c = document.createElement('canvas'); c.width = Math.round(img.naturalWidth * SCALE); c.height = Math.round(img.naturalHeight * SCALE);
@@ -44,21 +46,32 @@ function metalLUT(M) {
   }
   return lut;
 }
+const tortCache = new Map();
 function tortoiseField(W, H, F) {
   // layered tortoiseshell: soft amber base mottling + many small elongated dark flecks + a few crisp dark specks
-  // (scaled to the asset resolution; flecks are stretched along the frame like real cut acetate)
-  const c = document.createElement('canvas'); c.width = W; c.height = H; const x = c.getContext('2d');
-  const q = W / 800; x.fillStyle = F.c; x.fillRect(0, 0, W, H);
+  // (scaled to the asset resolution; flecks are stretched along the frame like real cut acetate).
+  // No canvas filters: blur() on ~850 shapes made the final getImageData take ~2.5 s and spike memory (and on a GPU canvas
+  // it is hundreds of blur passes + a forced readback). Softness now comes from drawing at low resolution and upscaling.
+  const key = W + 'x' + H + F.c + F.spot; if (tortCache.has(key)) return tortCache.get(key);
+  const mkc = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+  const q = W / 800, [sr, sg, sb] = hex(F.spot);
   let seed = 11; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
-  const [sr, sg, sb] = hex(F.spot);
-  x.filter = `blur(${(4 * q).toFixed(1)}px)`;
-  for (let i = 0; i < 110; i++) { const px = rnd() * W, py = rnd() * H, r = (14 + rnd() * 26) * q; x.fillStyle = `rgba(${sr},${sg},${sb},${0.35 + rnd() * 0.35})`; x.beginPath(); x.ellipse(px, py, r * 1.5, r * 0.9, -0.3 + rnd() * 0.6, 0, 7); x.fill(); }
-  for (let i = 0; i < 40; i++) { const px = rnd() * W, py = rnd() * H, r = (5 + rnd() * 10) * q; x.fillStyle = `rgba(214,150,76,${0.12 + rnd() * 0.15})`; x.beginPath(); x.ellipse(px, py, r * 1.4, r, rnd() - 0.5, 0, 7); x.fill(); }
-  x.filter = `blur(${(1.6 * q).toFixed(1)}px)`;
-  for (let i = 0; i < 700; i++) { const px = rnd() * W, py = rnd() * H, r = (2 + rnd() * rnd() * 9) * q; x.fillStyle = `rgba(${sr},${sg},${sb},${0.4 + rnd() * 0.45})`; x.beginPath(); x.ellipse(px, py, r * (1.1 + rnd() * 0.7), r * 0.8, rnd() * 3, 0, 7); x.fill(); }
-  x.filter = 'none';
-  for (let i = 0; i < 200; i++) { const px = rnd() * W, py = rnd() * H, r = (0.8 + rnd() * 1.6) * q; x.fillStyle = `rgba(${sr * 0.6 | 0},${sg * 0.6 | 0},${sb * 0.6 | 0},${0.5 + rnd() * 0.4})`; x.beginPath(); x.ellipse(px, py, r * 1.3, r, rnd() * 3, 0, 7); x.fill(); }
-  return x.getImageData(0, 0, W, H).data;
+  const ell = (x, px, py, rx, ry, rot) => { x.beginPath(); x.ellipse(px, py, rx, ry, rot, 0, 7); x.fill(); };
+  // base mottling (was blur 4q) at 1/6 resolution
+  const k1 = 6, A = mkc(Math.ceil(W / k1), Math.ceil(H / k1)), ax = A.getContext('2d', { willReadFrequently: true });
+  ax.fillStyle = F.c; ax.fillRect(0, 0, A.width, A.height); ax.setTransform(1 / k1, 0, 0, 1 / k1, 0, 0);
+  for (let i = 0; i < 110; i++) { const px = rnd() * W, py = rnd() * H, r = (14 + rnd() * 26) * q; ax.fillStyle = `rgba(${sr},${sg},${sb},${0.35 + rnd() * 0.35})`; ell(ax, px, py, r * 1.5, r * 0.9, -0.3 + rnd() * 0.6); }
+  for (let i = 0; i < 40; i++) { const px = rnd() * W, py = rnd() * H, r = (5 + rnd() * 10) * q; ax.fillStyle = `rgba(214,150,76,${0.12 + rnd() * 0.15})`; ell(ax, px, py, r * 1.4, r, rnd() - 0.5); }
+  // flecks (was blur 1.6q) at 1/2.5 resolution
+  const k2 = 2.5, B = mkc(Math.ceil(W / k2), Math.ceil(H / k2)), bx = B.getContext('2d', { willReadFrequently: true }); bx.setTransform(1 / k2, 0, 0, 1 / k2, 0, 0);
+  for (let i = 0; i < 700; i++) { const px = rnd() * W, py = rnd() * H, r = (2 + rnd() * rnd() * 9) * q; bx.fillStyle = `rgba(${sr},${sg},${sb},${0.4 + rnd() * 0.45})`; ell(bx, px, py, r * (1.1 + rnd() * 0.7), r * 0.8, rnd() * 3); }
+  const c = mkc(W, H), x = c.getContext('2d', { willReadFrequently: true }); x.imageSmoothingEnabled = true; x.imageSmoothingQuality = 'high';
+  x.drawImage(A, 0, 0, W, H); x.drawImage(B, 0, 0, W, H);
+  for (let i = 0; i < 200; i++) { const px = rnd() * W, py = rnd() * H, r = (0.8 + rnd() * 1.6) * q; x.fillStyle = `rgba(${sr * 0.6 | 0},${sg * 0.6 | 0},${sb * 0.6 | 0},${0.5 + rnd() * 0.4})`; ell(x, px, py, r * 1.3, r, rnd() * 3); }
+  const d = x.getImageData(0, 0, W, H).data;
+  A.width = A.height = B.width = B.height = c.width = c.height = 0;
+  tortCache.set(key, d); while (tortCache.size > 2) tortCache.delete(tortCache.keys().next().value);
+  return d;
 }
 function colorize(key, frameId, accentWarm) {
   const ck = key + '|' + frameId + '|' + accentWarm; if (colCache.has(ck)) return colCache.get(ck);
@@ -66,7 +79,7 @@ function colorize(key, frameId, accentWarm) {
   const ia = info.A ? load(key + '_a.png') : null, im = info.M ? load(key + '_m.png') : null, il = load(key + '_l.png');
   if ((info.A && !ia) || (info.M && !im) || !il) return null;
   const F = FRAMES[frameId], sh = SHAPE_BY_ID[key.replace(/_(thick|wire)$/, '')], rim = sh.rim || 'full', thick = key.endsWith('_thick');
-  const W = Math.round(il.naturalWidth * SCALE), H = Math.round(il.naturalHeight * SCALE), PU = (manifest.px_per_unit || 160) * SCALE;
+  const W = Math.round(il.naturalWidth * SCALE), H = Math.round(il.naturalHeight * SCALE), PU = (manifest.px_per_unit || 160) * FILEK * SCALE;
   const frame = document.createElement('canvas'); frame.width = W; frame.height = H; const fx = frame.getContext('2d');
   const out = fx.createImageData(W, H), o = out.data;
   let tintC = null, tintImg = null;
@@ -165,4 +178,11 @@ export function preloadGlasses3D(shapeId, frameId, timeout = 4000) {
     };
     chk();
   });
+}
+
+// drop every colourised variant and decoded layer (new customer / memory pressure)
+export function purgeGlasses3D() {
+  for (const r0 of colCache.values()) for (const c of [r0.frame, r0.tint, r0.lens]) if (c && c.getContext) c.width = c.height = 0;
+  colCache.clear(); tortCache.clear();
+  for (const k in imgs) { if (imgs[k].ok) { const im = imgs[k].img; im.onload = im.onerror = null; im.removeAttribute('src'); delete imgs[k]; } }
 }

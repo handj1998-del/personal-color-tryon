@@ -119,12 +119,12 @@ async function callGemini({ key, model, img, prompt, ratio, signal }) {
   const url = `https://generativelanguage.googleapis.com/v1/models/${encodeURIComponent(model)}:generateContent`;
   const body = (withFormat) => ({
     contents: [{ role: 'user', parts: [{ text: prompt }, { inline_data: { mime_type: img.mime, data: img.b64 } }] }],
-    generationConfig: { responseModalities: ['TEXT', 'IMAGE'], ...(withFormat ? { responseFormat: { image: { aspectRatio: ratio, imageSize: '1K' } } } : {}) },
+    generationConfig: { responseModalities: ['TEXT', 'IMAGE'], ...(withFormat ? { imageConfig: { aspectRatio: ratio, imageSize: '1K' } } : {}) },
   });
   let r = await fetch(url, { method: 'POST', signal, headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key }, body: JSON.stringify(body(true)) });
-  if (r.status === 400) { // older API surface without responseFormat: retry plain
+  if (r.status === 400) { // a model/API version that rejects imageConfig: retry without it
     const msg = await errText(r);
-    if (/responseFormat|Unknown name|Invalid JSON payload/i.test(msg)) r = await fetch(url, { method: 'POST', signal, headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key }, body: JSON.stringify(body(false)) });
+    if (/image_?config|aspect_?ratio|image_?size|Unknown name|Invalid JSON payload|Invalid value/i.test(msg)) r = await fetch(url, { method: 'POST', signal, headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key }, body: JSON.stringify(body(false)) });
     else throw new AIError(msg, kindOf(400, msg));
   }
   if (!r.ok) { const msg = await errText(r); throw new AIError(msg, kindOf(r.status, msg)); }

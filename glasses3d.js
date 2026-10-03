@@ -149,3 +149,20 @@ export function drawGlasses3D(ctx, lensCtx, P, frameId, shapeId, gScale, accentW
   }
   return tintCtx && res.tint ? 'tint' : true;
 }
+// Resolves once the photoreal layers for this shape/frame are decoded (or failed / unavailable / timed out),
+// so callers can render once instead of re-composing while polling.
+export function preloadGlasses3D(shapeId, frameId, timeout = 4000) {
+  const key = variantKey(shapeId, frameId); if (!key) return Promise.resolve(false);
+  const info = manifest.keys[key], fns = [info.A && key + '_a.png', info.M && key + '_m.png', key + '_l.png'].filter(Boolean);
+  fns.forEach((fn) => load(fn));
+  const t0 = performance.now();
+  return new Promise((r) => {
+    const chk = () => {
+      const st = fns.map((fn) => imgs[fn]);
+      if (st.every((q) => q && q.ok)) return r(true);
+      if (st.some((q) => q && q.err) || performance.now() - t0 > timeout) return r(false);
+      setTimeout(chk, 50);
+    };
+    chk();
+  });
+}

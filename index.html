@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#fdf6f9">
+<title>퍼스널컬러 가상 피팅 · 안경 & 헤어</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="logo">🎨</span><div><h1>퍼스널컬러 가상 피팅</h1><p>안경테 · 헤어 컬러 실시간 테스트</p></div></div>
+  <div class="modes" role="tablist">
+    <button id="btnLive" class="mode on" role="tab">📷 라이브</button>
+    <button id="btnPhoto" class="mode" role="tab">🖼️ 사진</button>
+  </div>
+</header>
+
+<main class="layout">
+  <section class="stage-wrap">
+    <div class="stage" id="stage">
+      <canvas id="view"></canvas>
+      <video id="video" playsinline muted autoplay></video>
+      <div class="placeholder" id="placeholder">
+        <div class="ph-inner">
+          <div class="ph-icon">🙂</div>
+          <p id="phText">모델을 불러오는 중이에요…</p>
+          <div class="ph-btns">
+            <button class="pill primary" id="phCamera">카메라 켜기</button>
+            <label class="pill"><input type="file" id="fileInput2" accept="image/*" hidden>사진 올리기</label>
+            <button class="pill" id="phSample">샘플 사진</button>
+          </div>
+        </div>
+      </div>
+      <div class="badge" id="status">준비 중…</div>
+      <div class="badge right" id="fps"></div>
+      <div class="stage-ctrls">
+        <button class="ctrl" id="btnHold" title="누르고 있으면 원본">👁️ 원본</button>
+        <button class="shutter" id="btnCapture" title="촬영"><span></span></button>
+        <button class="ctrl" id="btnFlip" title="카메라 전환">🔄 전환</button>
+      </div>
+      <div class="stage-ctrls still" id="stillCtrls">
+        <button class="ctrl" id="btnHold2">👁️ 원본</button>
+        <button class="ctrl primary" id="btnRelive">📷 다시 라이브</button>
+        <label class="ctrl"><input type="file" id="fileInput" accept="image/*" hidden>🖼️ 다른 사진</label>
+      </div>
+    </div>
+    <div class="actions">
+      <div class="seg" role="group" aria-label="비교 방식">
+        <button id="cmpAfter" class="on">결과만</button>
+        <button id="cmpSplit">전/후 나란히</button>
+      </div>
+      <button class="pill primary" id="btnSave">⬇️ 이미지 저장</button>
+      <button class="pill" id="btnShare" hidden>📤 공유</button>
+    </div>
+    <p class="privacy">🔒 사진·영상은 이 기기 안에서만 처리되며 서버로 전송되지 않아요.</p>
+  </section>
+
+  <aside class="panel">
+    <div class="card">
+      <h2>퍼스널컬러 타입</h2>
+      <div class="types" id="types"></div>
+      <div class="subs" id="subs"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h2>헤어 컬러</h2>
+        <label class="switch"><input type="checkbox" id="worstToggle"><span>워스트 비교</span></label></div>
+      <div class="swatches" id="hairList"></div>
+      <div class="slider-row">
+        <span>강도</span>
+        <input type="range" id="intensity" min="0" max="100" value="75">
+        <output id="intensityVal">75%</output>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>안경테 컬러 · 소재</h2>
+      <div class="swatches frames" id="frameList"></div>
+      <h3>모양</h3>
+      <div class="shapes" id="shapeList"></div>
+      <div class="slider-row">
+        <span>크기</span>
+        <input type="range" id="gSize" min="85" max="120" value="100">
+        <output id="gSizeVal">100%</output>
+      </div>
+    </div>
+    <p class="credit">샘플 사진: Wikimedia Commons “Woman 1.jpg” (Public domain, GAN 생성 인물) · 얼굴 인식: Google MediaPipe</p>
+  </aside>
+</main>
+<div class="toast" id="toast"></div>
+<script type="module" src="app.js"></script>
+</body>
+</html>

@@ -9,7 +9,7 @@
 </head>
 <body>
 <header class="top">
-  <div class="brand"><span class="logo">🎨</span><div><h1>퍼스널컬러 가상 피팅</h1><p>안경테 · 헤어 컬러 실시간 테스트</p></div></div>
+  <div class="brand"><span class="logo">🎨</span><div><h1>퍼스널컬러 가상 피팅</h1><p>안경테 · 헤어 컬러 · 헤어스타일 실시간 테스트</p></div></div>
   <div class="modes" role="tablist">
     <button id="btnLive" class="mode on" role="tab">📷 라이브</button>
     <button id="btnPhoto" class="mode" role="tab">🖼️ 사진</button>
@@ -64,6 +64,12 @@
     </div>
 
     <div class="card">
+      <div class="card-head"><h2>헤어스타일</h2><div class="subs tight" id="genders"></div></div>
+      <div class="styles" id="styleList"></div>
+      <div id="bangRow" hidden><h3>앞머리</h3><div class="subs" id="bangList"></div></div>
+    </div>
+
+    <div class="card">
       <div class="card-head"><h2>헤어 컬러</h2>
         <label class="switch"><input type="checkbox" id="worstToggle"><span>워스트 비교</span></label></div>
       <div class="swatches" id="hairList"></div>
@@ -77,7 +83,7 @@
     <div class="card">
       <h2>안경테 컬러 · 소재</h2>
       <div class="swatches frames" id="frameList"></div>
-      <h3>모양</h3>
+      <h3>모양 <small>(좌우로 스크롤)</small></h3>
       <div class="shapes" id="shapeList"></div>
       <div class="slider-row">
         <span>크기</span>

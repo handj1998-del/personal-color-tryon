@@ -81,6 +81,7 @@ button,label.pill,label.ctrl{font:inherit;cursor:pointer}
 .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(20px);background:#3d3346;color:#fff;padding:10px 16px;border-radius:999px;font-size:14px;opacity:0;transition:.25s;pointer-events:none;z-index:20;max-width:90vw;text-align:center}
 .toast.show{opacity:1;transform:translateX(-50%)}
 .layout{grid-template-columns:minmax(0,1fr)}
+@media (min-width:900px){.layout{grid-template-columns:minmax(0,1.35fr) minmax(340px,1fr)}}
 .stage-wrap,.panel{min-width:0}
 .mode{white-space:nowrap}
 @media (max-width:560px){
@@ -95,3 +96,16 @@ button,label.pill,label.ctrl{font:inherit;cursor:pointer}
   .shapes{grid-template-columns:repeat(5,1fr);gap:5px}.shape svg{width:44px}
   .swatches{grid-template-columns:repeat(auto-fill,minmax(68px,1fr))}
 }
+/* v2: shape grid + hairstyles */
+.shapes{display:grid;grid-auto-flow:column;grid-template-rows:repeat(2,auto);grid-auto-columns:84px;grid-template-columns:none;gap:8px;overflow-x:auto;padding-bottom:6px;scroll-snap-type:x proximity;-webkit-overflow-scrolling:touch}
+.shape{scroll-snap-align:start;padding:6px 2px 5px}
+.shape svg{width:70px;height:30px}
+.shape span{font-size:11.5px;white-space:nowrap}
+.card h3 small{font-weight:400;font-size:11px}
+.subs.tight{margin-top:0}
+.styles{display:grid;grid-template-columns:repeat(auto-fill,minmax(78px,1fr));gap:8px;max-height:330px;overflow-y:auto;padding:2px}
+.style{border:2px solid var(--line);background:#fff;border-radius:14px;padding:4px 2px 6px;display:flex;flex-direction:column;align-items:center;gap:2px;font-size:12px;color:var(--ink)}
+.style svg{width:58px;height:66px}
+.style.on{border-color:var(--accent);background:var(--soft)}
+.style span{line-height:1.2;text-align:center;word-break:keep-all}
+@media (max-width:560px){.shapes{grid-auto-columns:76px}.shape svg{width:62px}}

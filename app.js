@@ -15,6 +15,11 @@ const FACE_MODEL = VENDOR + 'face_landmarker.task';
 const SEG_MODEL = VENDOR + 'hair_segmenter.tflite';
 
 /* ------------------------------------------------------------------ data */
+// Android / low-memory devices: CPU delegate by default (mobile GPU delegates can crash or lose the WebGL context mid-session),
+// smaller caches and a lower display-resolution cap for the glasses pass
+const IS_ANDROID = /Android/i.test(navigator.userAgent);
+const LOWMEM = IS_ANDROID || (navigator.deviceMemory && navigator.deviceMemory <= 4);
+const freeCanvas = (c) => { if (c && c.getContext) { c.width = c.height = 0; } };
 const TYPES = {
   spring: { n: '봄 웜', e: '🌸', bg: 'var(--spring)', worst: 'winter', warm: true,
     subs: [['light', '라이트'], ['bright', '브라이트']],
@@ -155,7 +160,7 @@ async function loadModels() {
     minFaceDetectionConfidence: 0.5, minFacePresenceConfidence: 0.5, minTrackingConfidence: 0.5 });
   mkSeg = (d) => MP.ImageSegmenter.createFromOptions(files, {
     baseOptions: { modelAssetPath: SEG_MODEL, delegate: d }, runningMode: 'VIDEO', outputConfidenceMasks: true, outputCategoryMask: false });
-  const forceCPU = new URLSearchParams(location.search).has('cpu');
+  const qp = new URLSearchParams(location.search), forceCPU = qp.has('cpu') || (IS_ANDROID && !qp.has('gpu'));
   try { if (forceCPU) throw 0; face = await mkFace('GPU'); seg = await mkSeg('GPU'); delegate = 'GPU'; }
   catch (e) { console.warn('GPU delegate failed, using CPU', e); face = face || await mkFace('CPU'); seg = await mkSeg('CPU'); delegate = 'CPU'; }
   faceMode = segMode = 'VIDEO'; stats.delegate = delegate;
@@ -448,7 +453,7 @@ function photoStyle(id, bang) {
   const e = photoEntry(id); if (!e) return null;
   const b = photoBang(e, bang), file = e.bangs[b], key = id + '|' + b;
   const pc = photoCache[key];
-  if (pc && pc.ready) return pc.st;
+  if (pc && pc.ready) { pc.t = performance.now(); return pc.st; }
   if (pc) return pc.failed ? null : 'loading';
   const ent = (photoCache[key] = { ready: false });
   const img = new Image();
@@ -478,8 +483,12 @@ function photoStyle(id, bang) {
       ud.data[i + 3] = Math.min(255, a * (4 + 12 * tz)) * Math.max(side, low) * Math.max(band, tz); ud.data[i + 1] = 128;
     }
     ux.putImageData(ud, 0, 0);
-    const under = mk(TW, TH); { const ux2 = under.getContext('2d'); ux2.imageSmoothingQuality = 'high'; ux2.drawImage(u, 0, 0, TW, TH); }
-    ent.st = { back, front, under, id: 'p:' + id, bang: b, g: st0.g, ears: !!st0.ears, photo: true, hl: (e.hl || {})[b] }; ent.ready = true;
+    const under = u; // kept at quarter resolution (it is a blurred layer anyway); drawn stretched to the template size
+    freeCanvas(all); freeCanvas(c);
+    ent.st = { back, front, under, id: 'p:' + id, bang: b, g: st0.g, ears: !!st0.ears, photo: true, hl: (e.hl || {})[b] }; ent.ready = true; ent.t = performance.now();
+    { const ready = Object.entries(photoCache).filter(([k, v]) => v.ready && k !== key).sort((a, b) => a[1].t - b[1].t), maxP = LOWMEM ? 2 : 6;
+      while (ready.length >= maxP) { const [k, v] = ready.shift(); freeCanvas(v.st.back); freeCanvas(v.st.front); freeCanvas(v.st.under); delete photoCache[k];
+        for (const ck in colorCache) if (ck.startsWith('p:' + k.replace('|', '|'))) { const e2 = colorCache[ck]; freeCanvas(e2.back); freeCanvas(e2.front); freeCanvas(e2.under); delete colorCache[ck]; } } }
     if (S.style === id) rerender();
   };
   img.onerror = () => { ent.failed = true; };
@@ -513,7 +522,8 @@ function styleLook() {
 function coloredStyle(st) {
   const hex = styleHex(), lk = styleLook(), key = st.id + '|' + st.bang + '|' + hex + '|' + lk.light + '|' + lk.expo + '|' + lk.skin;
   if (!colorCache[key]) {
-    if (Object.keys(colorCache).length > 8) for (const k in colorCache) delete colorCache[k];
+    const keys = Object.keys(colorCache), maxC = LOWMEM ? 3 : 8;
+    while (keys.length >= maxC) { const k = keys.shift(), e = colorCache[k]; if (e) { freeCanvas(e.back); freeCanvas(e.front); freeCanvas(e.under); } delete colorCache[k]; }
     const o = { ...lk, photo: !!st.photo }; colorCache[key] = { back: colorize(st.back, hex, hairLUT, o), front: st.front ? colorize(st.front, hex, hairLUT, o) : null, under: st.under ? colorize(st.under, hex, hairLUT, o) : null };
   }
   return colorCache[key];
@@ -548,7 +558,7 @@ function compose(W, H, P, mask) {
     }
     const col = coloredStyle(st), T = templateTransform(HA);
     outX.drawImage(baseC, 0, 0);
-    if (col.under && !S.dbgNoUnder) { outX.save(); outX.setTransform(...T); outX.filter = st.g === 'm' ? 'brightness(0.8) blur(2px)' : 'brightness(0.7)'; outX.drawImage(col.under, 0, 0); outX.restore(); }
+    if (col.under && !S.dbgNoUnder) { outX.save(); outX.setTransform(...T); outX.filter = st.g === 'm' ? 'brightness(0.8) blur(2px)' : 'brightness(0.7)'; outX.drawImage(col.under, 0, 0, 1080, 1332); outX.restore(); }
     if (!S.dbgNoBack) { outX.save(); outX.setTransform(...T); outX.imageSmoothingQuality = 'high'; outX.drawImage(col.back, 0, 0); outX.restore(); }
     // occluder = face oval (+ neck) from the hair-free base image
     const ow = Math.round(W / 4), oh = Math.round(H / 4);
@@ -637,7 +647,7 @@ const paneC = mk(), paneX = paneC.getContext('2d');
 function calcHiScale(W, H) {
   if (S.noHiGlasses || !stage.clientWidth) return 1;
   const tw = S.compare === 'split' ? W * 2 : W, fit = Math.min(stage.clientWidth / tw, stage.clientHeight / H) * (window.devicePixelRatio || 1);
-  let s = Math.min(2.5, Math.max(1, fit), 2600 / Math.max(tw, H));
+  let s = Math.min(LOWMEM ? 1.5 : 2.5, Math.max(1, fit), (LOWMEM ? 1800 : 2600) / Math.max(tw, H));
   s = Math.round(s * 4) / 4; return s < 1.2 ? 1 : s;
 }
 function scaleP(o, s) {
@@ -653,6 +663,7 @@ function present(target = view, labels = true) {
   if (target.width !== tw || target.height !== H) { target.width = tw; target.height = H; }
   const x = target.getContext('2d'); x.imageSmoothingEnabled = true; x.imageSmoothingQuality = 'high';
   let after = outC;
+  if (sc === 1 && paneC.width > 1) { paneC.width = paneC.height = 1; }
   if (sc !== 1 && !S.holdBefore) { // hi-res pass: upscale the composed frame, then draw the glasses at full resolution
     ensure(paneC, W, H); paneX.imageSmoothingEnabled = true; paneX.imageSmoothingQuality = 'high'; paneX.drawImage(outC, 0, 0, W, H);
     if (lm) glassesPass(paneX, W, H, scaleP(lm, sc)); after = paneC;
@@ -672,7 +683,7 @@ function present(target = view, labels = true) {
 
 /* ------------------------------------------------------------------ live mode */
 const LIVE_CAP = +(new URLSearchParams(location.search).get('res') || 800);
-let frameNo = 0, fpsT0 = 0, fpsN = 0;
+let frameNo = 0, fpsT0 = 0, fpsN = 0, liveErr = 0;
 function liveSize() { const vw = video.videoWidth, vh = video.videoHeight, s = Math.min(1, LIVE_CAP / Math.max(vw, vh)); return [Math.round(vw * s), Math.round(vh * s)]; }
 function liveLoop() {
   liveRAF = requestAnimationFrame(liveLoop);
@@ -680,13 +691,13 @@ function liveLoop() {
   const t0 = performance.now(), [W, H] = liveSize();
   if (rawC.width !== W || rawC.height !== H) { rawC.width = W; rawC.height = H; hairMask = null; }
   rawX.drawImage(video, 0, 0, W, H);
-  try { const r = face.detectForVideo(video, t0); const p = extractLm(r, W, H, t0); if (!p) resetFilters(); lm = p; } catch (e) { console.warn(e); }
+  try { const r = face.detectForVideo(video, t0); const p = extractLm(r, W, H, t0); if (!p) resetFilters(); lm = p; liveErr = 0; } catch (e) { console.warn(e); if (++liveErr >= 3 && delegate === 'GPU' && !switching) switchToCPU(); }
   const t1 = performance.now(); stats.detMs = stats.detMs * 0.9 + (t1 - t0) * 0.1;
   frameNo++;
   const needSeg = S.hair || S.style !== 'none';
   if (needSeg && frameNo % stats.segEvery === 0) {
     segInputFrom(rawC, W, H, 256);
-    try { seg.segmentForVideo(segIn, t0, (res) => { const ti = performance.now(); stats.inferMs = ti - t1; const m = takeMasks(res); stats.takeMs = performance.now() - ti; if (m) hairMask = buildSeg(m.masks, m.w, m.h, hairMask, lm); stats.postMs = performance.now() - ti; }); } catch (e) { console.warn(e); }
+    try { seg.segmentForVideo(segIn, t0, (res) => { const ti = performance.now(); stats.inferMs = ti - t1; const m = takeMasks(res); stats.takeMs = performance.now() - ti; if (m) hairMask = buildSeg(m.masks, m.w, m.h, hairMask, lm); stats.postMs = performance.now() - ti; }); } catch (e) { console.warn(e); if (++liveErr >= 3 && delegate === 'GPU' && !switching) switchToCPU(); }
     stats.segMs = stats.segMs * 0.8 + (performance.now() - t1) * 0.2;
   }
   const t2 = performance.now();
@@ -745,7 +756,7 @@ function rebuildStillSeg() { // style toggled on a still: recompute inpaint/neck
 function renderStill() { if (S.mode !== 'still') return; compose(rawC.width, rawC.height, lm, hairMask); present(); }
 async function loadStillFrom(src, sw, sh, mirrorIt) {
   stopLoop(); S.mode = 'still'; mirror = mirrorIt; origHex = null; grainC = null; look = null;
-  const s = Math.min(1, 1600 / Math.max(sw, sh));
+  const s = Math.min(1, (LOWMEM ? 1200 : 1600) / Math.max(sw, sh));
   rawC.width = Math.round(sw * s); rawC.height = Math.round(sh * s);
   rawX.drawImage(src, 0, 0, rawC.width, rawC.height);
   stage.classList.add('is-still'); $('placeholder').classList.add('hide');
@@ -757,9 +768,14 @@ async function loadStillFrom(src, sw, sh, mirrorIt) {
   renderStill();
 }
 async function capture() { if (S.mode !== 'live' || !video.videoWidth) return; await loadStillFrom(video, video.videoWidth, video.videoHeight, mirror); toast('촬영했어요! 저장하거나 컬러·스타일을 계속 바꿔보세요.'); }
+// big camera photos (12-50 MP) would decode to 50-200 MB; decode straight to <= ~1600 px wide instead
+async function decodePhoto(file) {
+  if (file.size > 1.2e6) { try { return await createImageBitmap(file, { imageOrientation: 'from-image', resizeWidth: 1600, resizeQuality: 'high' }); } catch (e) { /* older engines: full decode */ } }
+  return createImageBitmap(file, { imageOrientation: 'from-image' });
+}
 async function loadFile(file) {
   if (!file) return;
-  try { const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' }); await loadStillFrom(bmp, bmp.width, bmp.height, false); $('btnPhoto').classList.add('on'); $('btnLive').classList.remove('on'); }
+  try { const bmp = await decodePhoto(file); await loadStillFrom(bmp, bmp.width, bmp.height, false); $('btnPhoto').classList.add('on'); $('btnLive').classList.remove('on'); }
   catch (e) { console.error(e); toast('사진을 열 수 없어요'); }
 }
 async function loadSample() {
@@ -975,9 +991,10 @@ function rcRenderText() {
 }
 async function rcSelect(next) { rc.sel = next; rcRenderText(); await rcRender(rc.sel, $('rcMain'), 'main'); }
 function rcBind() {
+  if (!rc.el || !$('rcShot')) return; // stale cached index.html from an older version: no reco step
   $('rcSkip').onclick = () => rcClose('skip');
   $('rcShot').onclick = () => { if (cameraOK && video.videoWidth) rcAnalyze(video, video.videoWidth, video.videoHeight, mirror); };
-  $('rcFile').onchange = async (e) => { const f = e.target.files[0]; e.target.value = ''; if (!f) return; try { const bmp = await createImageBitmap(f, { imageOrientation: 'from-image' }); rcAnalyze(bmp, bmp.width, bmp.height, false); } catch (er) { toast('사진을 열 수 없어요'); } };
+  $('rcFile').onchange = async (e) => { const f = e.target.files[0]; e.target.value = ''; if (!f) return; try { const bmp = await decodePhoto(f); rcAnalyze(bmp, bmp.width, bmp.height, false); } catch (er) { toast('사진을 열 수 없어요'); } };
   $('rcRetake').onclick = () => { rcShow('rcCap'); if (cameraOK) rcPreviewLoop(); };
   $('rcThumbs').onclick = (e) => { const b = e.target.closest('[data-i]'); if (!b || rc.busy) return; [...$('rcThumbs').children].forEach((q) => q.classList.toggle('on', q === b)); rcSelect({ ...rc.combos[+b.dataset.i] }); };
   const lists = (e) => { const li = e.target.closest('li[data-k]'); if (!li || rc.busy) return; const k = li.dataset.k, i = +li.dataset.i; const src = k === 'g' ? rc.res.glasses : k === 'h' ? rc.res.hair : rc.res.colors; rcSelect({ ...rc.sel, [k]: src[i] }); };
@@ -1028,7 +1045,7 @@ async function startSession() { // after the cover tap
     try { if (!cameraOK) await startCamera(); } catch (e) { console.warn(e); }
     await fade;
   }
-  const how = new URLSearchParams(location.search).has('noreco') ? 'skip' : await recoFlow();
+  const how = new URLSearchParams(location.search).has('noreco') || !rc.el || !$('rcShot') ? 'skip' : await recoFlow();
   if (cameraOK) await goLive();
   else if (how === 'live' && lm) { S.mode = 'still'; stage.classList.add('is-still'); $('placeholder').classList.add('hide'); rebuildStillSeg(); renderStill(); showPhotoMode(); }
   else showPhotoMode();

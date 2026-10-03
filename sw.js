@@ -1,6 +1,6 @@
 // Service worker: caches the app shell and the self-hosted MediaPipe runtime/models so the app works offline
 // after the first visit. Bump VERSION on every deploy.
-const VERSION = 'pc-tryon-v11';
+const VERSION = 'pc-tryon-v12';
 const SHELL = ['./', './index.html', './style.css', './app.js', './frames.js', './hairstyle.js', './glasses3d.js', './reco.js', './manifest.webmanifest',
   './assets/glasses/glasses.json', './assets/hair/hair.json',
   './assets/sample.jpg', './icons/icon-192.png', './icons/icon-512.png', './icons/icon-maskable-512.png', './icons/apple-touch-icon.png', './icons/favicon-32.png', './assets/fonts/cormorant-latin.woff2'];
@@ -31,7 +31,12 @@ self.addEventListener('fetch', (e) => {
   const heavy = url.pathname.includes('/vendor/');
   e.respondWith((async () => {
     const c = await caches.open(VERSION);
-    const hit = await c.match(req, { ignoreSearch: true }) || (req.mode === 'navigate' ? await c.match('./index.html') : null);
+    if (req.mode === 'navigate') { // network-first for the page itself (so HTML and modules of a new version don't mix), cache when offline/slow
+      const ctl = new AbortController(), to = setTimeout(() => ctl.abort(), 3500);
+      try { const r = await fetch(req, { signal: ctl.signal }); clearTimeout(to); if (r.ok) { c.put('./index.html', r.clone()); return r; } } catch (err) { /* offline */ }
+      return (await c.match(req, { ignoreSearch: true })) || (await c.match('./index.html')) || new Response('오프라인 상태입니다.', { status: 503, headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
+    }
+    const hit = await c.match(req, { ignoreSearch: true });
     if (heavy && hit) return hit;                       // cache-first for the big runtime/model files
     const net = fetch(req).then((r) => { if (r.ok && r.type === 'basic') c.put(req, r.clone()); return r; }).catch(() => null);
     if (hit) { e.waitUntil(net); return hit; }           // stale-while-revalidate for the app shell

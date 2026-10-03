@@ -5,6 +5,9 @@ import { FRAMES, SHAPE_BY_ID, drawGlasses } from './frames.js';
 const BASE = new URL('./assets/glasses/', import.meta.url).href;
 let manifest = null, onReady = null;
 const imgs = {}, colCache = new Map();
+// Android / low-memory: work at half the asset resolution (still >= the old 1x renders) and keep fewer colourised variants
+const LOW = /Android/i.test(navigator.userAgent) || (navigator.deviceMemory && navigator.deviceMemory <= 4);
+const SCALE = LOW ? 0.5 : 1, MAXC = LOW ? 3 : 8;
 export function initGlasses3D(cb) {
   onReady = cb;
   fetch(BASE + 'glasses.json').then((r) => r.json()).then((m) => { manifest = m; cb && cb(); }).catch(() => {});
@@ -17,10 +20,11 @@ function load(fn) {
   img.onerror = () => { imgs[fn].err = true; };
   img.src = BASE + fn; return null;
 }
-function pixels(img) {
-  const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight;
-  const x = c.getContext('2d', { willReadFrequently: true }); x.drawImage(img, 0, 0); return x.getImageData(0, 0, c.width, c.height);
+function scaled(img) {
+  const c = document.createElement('canvas'); c.width = Math.round(img.naturalWidth * SCALE); c.height = Math.round(img.naturalHeight * SCALE);
+  const x = c.getContext('2d', { willReadFrequently: true }); x.imageSmoothingQuality = 'high'; x.drawImage(img, 0, 0, c.width, c.height); return c;
 }
+function pixels(img) { const c = scaled(img), d = c.getContext('2d').getImageData(0, 0, c.width, c.height); c.width = c.height = 0; return d; }
 export function variantKey(shapeId, frameId) {
   const sh = SHAPE_BY_ID[shapeId], F = FRAMES[frameId]; if (!sh || !sh.d || !F || !manifest) return null;
   const rim = sh.rim || 'full';
@@ -62,7 +66,7 @@ function colorize(key, frameId, accentWarm) {
   const ia = info.A ? load(key + '_a.png') : null, im = info.M ? load(key + '_m.png') : null, il = load(key + '_l.png');
   if ((info.A && !ia) || (info.M && !im) || !il) return null;
   const F = FRAMES[frameId], sh = SHAPE_BY_ID[key.replace(/_(thick|wire)$/, '')], rim = sh.rim || 'full', thick = key.endsWith('_thick');
-  const W = il.naturalWidth, H = il.naturalHeight;
+  const W = Math.round(il.naturalWidth * SCALE), H = Math.round(il.naturalHeight * SCALE), PU = (manifest.px_per_unit || 160) * SCALE;
   const frame = document.createElement('canvas'); frame.width = W; frame.height = H; const fx = frame.getContext('2d');
   const out = fx.createImageData(W, H), o = out.data;
   let tintC = null, tintImg = null;
@@ -82,7 +86,7 @@ function colorize(key, frameId, accentWarm) {
     if (AF.kind === 'clear') { tintC = document.createElement('canvas'); tintC.width = W; tintC.height = H; tintImg = tintC.getContext('2d').createImageData(W, H); }
     const td = tintImg ? tintImg.data : null;
     // vertical extent of acetate for gradient frames
-    const PU = manifest.px_per_unit || 160, y0 = H * 0.5 - 0.75 * PU, y1 = H * 0.5 + 0.55 * PU;
+    const y0 = H * 0.5 - 0.75 * PU, y1 = H * 0.5 + 0.55 * PU;
     for (let y = 0; y < H; y++) {
       const gy = Math.min(1, Math.max(0, (y - y0) / (y1 - y0)));
       for (let x = 0; x < W; x++) {
@@ -110,8 +114,9 @@ function colorize(key, frameId, accentWarm) {
   }
   fx.putImageData(out, 0, 0);
   if (tintC) tintC.getContext('2d').putImageData(tintImg, 0, 0);
-  const res = { frame, lens: il, tint: tintC, W, H, info };
-  colCache.set(ck, res); if (colCache.size > 10) colCache.delete(colCache.keys().next().value);
+  const res = { frame, lens: SCALE === 1 ? il : scaled(il), tint: tintC, W, H, info, k: PU };
+  colCache.set(ck, res);
+  while (colCache.size > MAXC) { const k0 = colCache.keys().next().value, r0 = colCache.get(k0); colCache.delete(k0); for (const c of [r0.frame, r0.tint, r0.lens]) if (c && c.getContext) c.width = c.height = 0; }
   return res;
 }
 function mixh(h1, h2, t) { const a = hex(h1), b = hex(h2); return '#' + a.map((v, i) => Math.round(v + (b[i] - v) * t).toString(16).padStart(2, '0')).join(''); }
@@ -130,7 +135,7 @@ export function drawGlasses3D(ctx, lensCtx, P, frameId, shapeId, gScale, accentW
   const e = { x: dx / d, y: dy / d }, n = { x: -e.y, y: e.x };
   const t = Math.min(d * 0.7, Math.max(d * 0.3, (P.B.x - L.x) * e.x + (P.B.y - L.y) * e.y));
   const C = { x: L.x + e.x * t, y: L.y + e.y * t };
-  const g = gScale * 0.94, u = (d / 2) * g, k = manifest.px_per_unit || 160, cx = res.W / 2, cy = res.H / 2;
+  const g = gScale * 0.94, u = (d / 2) * g, k = res.k, cx = res.W / 2, cy = res.H / 2;
   const sides = [{ s: (d - t) * g, sx: cx, sw: res.W - cx }, { s: t * g, sx: 0, sw: cx }];
   const jobs = [[ctx, res.frame], [lensCtx, res.lens]]; if (tintCtx && res.tint) jobs.push([tintCtx, res.tint]);
   for (const [target, src] of jobs) {

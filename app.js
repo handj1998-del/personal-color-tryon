@@ -1,5 +1,6 @@
 // 퍼스널컬러 가상 피팅 — 100% client-side. Photos/video never leave the device.
 import { FRAMES, SHAPES, drawGlasses, shapeIconSVG, mix, rgba } from './frames.js';
+import { PROVIDERS, loadSettings, saveSettings, modelOf, generate as aiGenerate, errorMessage as aiErrorMessage, buildPrompt } from './ai.js';
 import { STYLES, BANGS, OVAL_IDX, CANON, buildStyle, colorize, fitAffine, templateTransform, invAffine, styleIconSVG } from './hairstyle.js';
 
 const MP_VER = '1.0.1';
@@ -365,8 +366,12 @@ function ensure(c, W, H) { if (c.width !== W || c.height !== H) { c.width = W; c
 function compose(W, H, P, mask) {
   ensure(outC, W, H); ensure(glassC, W, H);
   const t0 = performance.now();
-  const st = P && P.aff ? currentStyle() : null;
-  if (st) {
+  const ai = aiCurrent();
+  if (ai) P = ai.lm || P;
+  const st = !ai && P && P.aff ? currentStyle() : null;
+  if (ai) {
+    outX.drawImage(ai.c, 0, 0);
+  } else if (st) {
     ensure(baseC, W, H); ensure(occFC, W, H);
     baseX.drawImage(rawC, 0, 0);
     if (mask && mask.fill) {
@@ -433,7 +438,8 @@ function compose(W, H, P, mask) {
   }
   const t1 = performance.now(); stats.hairMs = stats.hairMs * 0.9 + (t1 - t0) * 0.1;
   if (P && S.shape !== 'none') {
-    drawGlasses(glassX, P, S.frame, S.shape, S.gScale, TYPES[S.type].warm, !!(st && st.g === 'f' && !st.ears));
+    const sdef = S.style !== 'none' ? STYLES.find((q) => q.id === S.style) : null;
+    drawGlasses(glassX, P, S.frame, S.shape, S.gScale, TYPES[S.type].warm, !!(sdef && sdef.g === 'f' && !sdef.ears));
     const d = Math.hypot(P.iR.x - P.iL.x, P.iR.y - P.iL.y);
     const sw = Math.max(8, Math.round(W / 6)), sh = Math.max(8, Math.round(H / 6));
     ensure(shadowC, sw, sh);
@@ -508,6 +514,7 @@ async function goLive() {
     stage.classList.remove('is-still', 'no-live'); $('placeholder').classList.add('hide');
     $('btnLive').classList.add('on'); $('btnPhoto').classList.remove('on');
     if (!liveRAF) liveLoop();
+    updateAIUI();
   } catch (e) { console.warn(e); cameraOK = false; toast('카메라를 쓸 수 없어요: ' + (e.message || e.name || e)); showPhotoMode(); }
 }
 function stopLoop() { if (liveRAF) cancelAnimationFrame(liveRAF); liveRAF = 0; }
@@ -535,7 +542,7 @@ function rebuildStillSeg() { // style toggled on a still: recompute inpaint/neck
 }
 function renderStill() { if (S.mode !== 'still') return; compose(rawC.width, rawC.height, lm, hairMask); present(); }
 async function loadStillFrom(src, sw, sh, mirrorIt) {
-  stopLoop(); S.mode = 'still'; mirror = mirrorIt; origHex = null; grainC = null; look = null;
+  stopLoop(); S.mode = 'still'; mirror = mirrorIt; origHex = null; grainC = null; look = null; photoId++; aiCache.clear();
   const s = Math.min(1, 1600 / Math.max(sw, sh));
   rawC.width = Math.round(sw * s); rawC.height = Math.round(sh * s);
   rawX.drawImage(src, 0, 0, rawC.width, rawC.height);
@@ -545,7 +552,7 @@ async function loadStillFrom(src, sw, sh, mirrorIt) {
   try { await analyzeStill(); } catch (e) { console.error(e); toast('분석 중 오류가 났어요'); }
   setStatus(lm ? '✓ 얼굴 인식 완료' : '얼굴을 찾지 못했어요 (헤어 컬러만 적용)');
   if (!lm) toast('얼굴을 찾지 못했어요. 정면 사진이 가장 잘 돼요.');
-  renderStill();
+  renderStill(); updateAIUI();
 }
 async function capture() { if (S.mode !== 'live' || !video.videoWidth) return; await loadStillFrom(video, video.videoWidth, video.videoHeight, mirror); toast('촬영했어요! 저장하거나 컬러·스타일을 계속 바꿔보세요.'); }
 async function loadFile(file) {
@@ -559,8 +566,133 @@ async function loadSample() {
 }
 function showPhotoMode() {
   stopLoop(); S.mode = 'still'; $('btnPhoto').classList.add('on'); $('btnLive').classList.remove('on');
+  updateAIUI();
   if (rawC.width < 2 || (!lm && !hairMask)) { $('placeholder').classList.remove('hide'); $('phText').textContent = '사진을 올리거나 샘플 사진으로 시작해 보세요'; stage.classList.add('no-live'); }
 }
+
+/* ------------------------------------------------------------------ AI 실제 합성 (cloud, opt-in) */
+let photoId = 0, aiAbort = null, aiSettings = loadSettings();
+const aiCache = new Map();
+S.aiView = true;
+function aiKey() {
+  const m = modelOf(aiSettings);
+  return [photoId, S.style, S.style !== 'none' ? (S.bang || '') : '', S.hair ? S.hair.n : '', S.hair ? (S.intensity < 0.5 ? 's' : 'f') : '', aiSettings.provider + ':' + m.id, aiSettings.keepFace ? 1 : 0].join('|');
+}
+function aiCurrent() { return S.mode === 'still' && S.aiView ? aiCache.get(aiKey()) || null : null; }
+function aiOpts() { const sd = STYLES.find((q) => q.id === S.style); return { style: S.style, bang: S.bang || (sd && sd.bang), gender: sd ? sd.g : S.gender, hair: S.hair, intensity: S.intensity }; }
+function updateAIUI() {
+  const btn = $('btnAI'), note = $('aiNote'), still = S.mode === 'still' && rawC.width > 2 && $('placeholder').classList.contains('hide');
+  const has = S.mode === 'still' && aiCache.has(aiKey()), anyForPhoto = [...aiCache.keys()].some((k) => k.startsWith(photoId + '|'));
+  const m = modelOf(aiSettings);
+  btn.disabled = !still || !navigator.onLine || !!aiAbort;
+  btn.textContent = has ? '✨ 다시 합성' : '✨ AI 실제 합성';
+  $('aiView').hidden = !has;
+  $('aiViewAI').classList.toggle('on', S.aiView); $('aiViewPrev').classList.toggle('on', !S.aiView);
+  note.classList.toggle('warn', !navigator.onLine);
+  if (!navigator.onLine) note.textContent = '📴 오프라인이에요. AI 실제 합성은 인터넷 연결이 필요해요 (다른 기능은 그대로 사용 가능).';
+  else if (S.mode !== 'still') note.textContent = '📷 촬영하거나 사진을 올리면 선택한 헤어스타일·컬러를 실제 사진처럼 AI로 합성할 수 있어요.';
+  else if (!aiSettings.key) note.textContent = '⚙️ AI 설정에서 API 키를 넣으면 사진처럼 자연스러운 AI 합성을 쓸 수 있어요.';
+  else if (has) note.textContent = `✨ AI 합성 결과예요 (${m.n.split(' ·')[0]}). 안경은 그 위에 다시 씌워져요. ‘미리보기’로 기존 합성과 비교할 수 있어요.`;
+  else note.textContent = `선택한 스타일·컬러로 AI 합성 · 1장 약 $${m.usd.toFixed(3)} (${PROVIDERS[aiSettings.provider].n})${anyForPhoto ? ' · 이전 결과는 스타일을 되돌리면 다시 보여요' : ''}`;
+}
+function sheet(id, show) { $(id).hidden = !show; }
+function openSettings() {
+  const st = aiSettings, P = PROVIDERS[st.provider] || PROVIDERS.gemini;
+  $('aiProvider').innerHTML = Object.entries(PROVIDERS).map(([k, v]) => `<option value="${k}" ${k === st.provider ? 'selected' : ''}>${v.n}</option>`).join('');
+  const fillModels = (pk) => { const PP = PROVIDERS[pk]; $('aiModel').innerHTML = PP.models.map((m) => `<option value="${m.id}">${m.n} · 약 $${m.usd}/장</option>`).join('');
+    $('aiKeyLabel').textContent = PP.keyName; $('aiKey').placeholder = PP.keyHint;
+    $('aiKeyHelp').innerHTML = `키 발급: <a href="${PP.signup}" target="_blank" rel="noopener">${PP.signup.replace('https://', '')}</a> ${pk === 'gemini' ? '(Google AI Studio → API 키 만들기. 이미지 모델은 결제(유료 등급) 설정이 필요해요)' : '(fal 대시보드 → Keys → Add key, 크레딧 충전 필요)'}`; };
+  fillModels(st.provider); $('aiModel').value = modelOf(st).id;
+  $('aiProvider').onchange = () => { fillModels($('aiProvider').value); $('aiKey').value = $('aiProvider').value === st.provider ? st.key : (st.keys && st.keys[$('aiProvider').value]) || ''; };
+  $('aiKey').value = st.key || ''; $('aiKey').type = 'password'; $('aiKeepFace').checked = st.keepFace !== false;
+  sheet('aiSettings', true);
+}
+function closeSettings(saveIt) {
+  if (saveIt) {
+    const pv = $('aiProvider').value, key = $('aiKey').value.trim();
+    const keys = { ...(aiSettings.keys || {}) }; keys[pv] = key;
+    aiSettings = { ...aiSettings, provider: pv, model: $('aiModel').value, key, keys, keepFace: $('aiKeepFace').checked };
+    saveSettings(aiSettings); toast(key ? 'AI 설정을 저장했어요 (이 기기에만 저장)' : 'API 키가 비어 있어요');
+  }
+  sheet('aiSettings', false); rerender();
+}
+function askConsent() {
+  return new Promise((res) => {
+    const m = modelOf(aiSettings); $('consentProv').textContent = PROVIDERS[aiSettings.provider].n; $('consentCost').textContent = '$' + m.usd.toFixed(3);
+    sheet('aiConsent', true);
+    $('consentYes').onclick = () => { sheet('aiConsent', false); aiSettings.consent = true; saveSettings(aiSettings); res(true); };
+    $('consentNo').onclick = () => { sheet('aiConsent', false); res(false); };
+  });
+}
+// paste the ORIGINAL inner face (eyes/brows/nose/mouth) back onto the AI result, aligned with a fitted affine,
+// so the customer's face stays pixel-identical. Skipped if the AI changed pose/expression too much.
+function keepOriginalFace(aiC, P0, P1, bangsCover) {
+  const ks = Object.keys(KEYS), fw = Math.hypot(P1.eR.x - P1.eL.x, P1.eR.y - P1.eL.y);
+  const T = fitAffine(ks.map((k) => [P0[k].x, P0[k].y, P1[k].x, P1[k].y, 1]));
+  const res = ks.reduce((a, k) => a + Math.hypot(T.a * P0[k].x + T.c * P0[k].y + T.e - P1[k].x, T.b * P0[k].x + T.d * P0[k].y + T.f - P1[k].y), 0) / ks.length / fw;
+  if (!(res < 0.04)) return { ok: false, res };
+  const W = aiC.width, H = aiC.height, k = 1 / 8, mw = Math.max(8, Math.round(W * k)), mh = Math.max(8, Math.round(H * k));
+  const mc = mk(mw, mh), mx = mc.getContext('2d'), A = P1.aff, top = bangsCover ? -0.1 : -0.36;
+  const R = [[0.6, top], [0.82, top + 0.12], [0.88, 0.25], [0.82, 0.62], [0.66, 0.92], [0.4, 1.17], [0, 1.28]];
+  const poly = R.concat(R.slice(0, -1).reverse().map(([x, y]) => [-x, y]));
+  mx.fillStyle = '#fff'; mx.beginPath();
+  poly.forEach(([x, y], i) => { const u = (A.a * x + A.c * y + A.e) * k, v = (A.b * x + A.d * y + A.f) * k; i ? mx.lineTo(u, v) : mx.moveTo(u, v); });
+  mx.closePath(); mx.fill();
+  const mc2 = mk(mw, mh), mx2 = mc2.getContext('2d'); mx2.filter = 'blur(1.5px)'; mx2.drawImage(mc, 0, 0); // feather (no-op where unsupported)
+  const fc = mk(W, H), fx = fc.getContext('2d');
+  fx.setTransform(T.a, T.b, T.c, T.d, T.e, T.f); fx.drawImage(rawC, 0, 0); fx.setTransform(1, 0, 0, 1, 0, 0);
+  fx.globalCompositeOperation = 'destination-in'; fx.imageSmoothingEnabled = true; fx.drawImage(mc2, 0, 0, W, H);
+  aiC.getContext('2d').drawImage(fc, 0, 0);
+  return { ok: true, res };
+}
+async function runAI() {
+  if (S.mode !== 'still' || rawC.width < 2) return toast('사진 모드에서 사용할 수 있어요');
+  if (!navigator.onLine) { updateAIUI(); return toast('오프라인에서는 AI 합성을 쓸 수 없어요'); }
+  if (!aiSettings.key) { toast('먼저 AI 설정에서 API 키를 넣어 주세요'); return openSettings(); }
+  if (S.style === 'none' && !S.hair) return toast('헤어스타일이나 헤어 컬러를 먼저 골라 주세요');
+  if (!aiSettings.consent && !(await askConsent())) return;
+  const key = aiKey(), myPhoto = photoId, t0 = performance.now(), m = modelOf(aiSettings);
+  const expect = /pro/.test(m.id) ? 30 : /lite/.test(m.id) ? 8 : 15;
+  aiAbort = new AbortController(); updateAIUI(); sheet('aiBusy', true);
+  const tick = setInterval(() => { const s = (performance.now() - t0) / 1000; $('aiBusyText').textContent = `AI 합성 중… ${Math.round(s)}초 (보통 ${expect}초 안팎)`; $('aiBar').style.width = (95 * (1 - Math.exp(-s / expect * 1.4))).toFixed(1) + '%'; }, 250);
+  try {
+    const opts = aiOpts();
+    const out = await aiGenerate(aiSettings, rawC, opts, aiAbort.signal);
+    if (myPhoto !== photoId) return;
+    $('aiBar').style.width = '100%'; $('aiBusyText').textContent = '얼굴 맞추는 중…';
+    const W = rawC.width, H = rawC.height, c = mk(W, H), x = c.getContext('2d'), b = out.bitmap;
+    const sc = Math.max(W / b.width, H / b.height), dw = b.width * sc, dh = b.height * sc; // cover-fit (ratios are matched, so ~no crop)
+    x.drawImage(b, (W - dw) / 2, (H - dh) / 2, dw, dh); const bw = b.width, bh = b.height; b.close && b.close();
+    await ensureMode('IMAGE');
+    let aiLm = extractLm(face.detect(c), W, H), kept = null;
+    if (aiSettings.keepFace !== false && lm && aiLm) {
+      kept = keepOriginalFace(c, lm, aiLm, ['full', 'seethrough', 'side'].includes(opts.bang) && opts.gender !== 'm' || ['dandy', 'twoblock', 'leaf', 'comma'].includes(opts.style));
+    }
+    aiCache.set(key, { c, lm: aiLm || lm, prompt: out.prompt, model: out.model, ms: performance.now() - t0, kept });
+    window.__pc.lastAI = { key, ms: Math.round(performance.now() - t0), model: out.model, prompt: out.prompt, faceFound: !!aiLm, kept, w: bw, h: bh };
+    S.aiView = true;
+    toast(aiLm ? `✨ AI 합성 완료 (${((performance.now() - t0) / 1000).toFixed(1)}초)` : 'AI 합성 완료 (얼굴을 다시 찾지 못해 안경은 원래 위치에 표시돼요)', 3200);
+  } catch (e) {
+    console.warn('AI', e); toast(aiErrorMessage(e), 5200);
+    window.__pc.lastAIError = { kind: e.kind || e.name, msg: String(e.message || e) };
+    if (e.kind === 'auth') openSettings();
+  } finally {
+    clearInterval(tick); sheet('aiBusy', false); aiAbort = null; rerender();
+  }
+}
+function bindAI() {
+  $('btnAI').onclick = runAI; $('btnAISettings').onclick = openSettings;
+  $('aiCancel').onclick = () => aiAbort && aiAbort.abort();
+  $('aiSetClose').onclick = () => closeSettings(true);
+  $('aiKeyClear').onclick = () => { $('aiKey').value = ''; closeSettings(true); };
+  $('aiKeyShow').onclick = () => { const i = $('aiKey'); i.type = i.type === 'password' ? 'text' : 'password'; $('aiKeyShow').textContent = i.type === 'password' ? '보기' : '숨기기'; };
+  $('aiSettings').addEventListener('click', (e) => { if (e.target.id === 'aiSettings') closeSettings(false); });
+  $('aiViewAI').onclick = () => { S.aiView = true; rerender(); };
+  $('aiViewPrev').onclick = () => { S.aiView = false; rerender(); };
+  addEventListener('online', updateAIUI); addEventListener('offline', updateAIUI);
+  updateAIUI();
+}
+window.__pc.ai = { buildPrompt: () => buildPrompt(aiOpts()), settings: () => ({ ...aiSettings, key: aiSettings.key ? '***' : '' }), run: runAI };
 
 /* ------------------------------------------------------------------ save / share */
 function buildExport() {
@@ -570,7 +702,7 @@ function buildExport() {
   x.drawImage(c, 0, 0); x.fillStyle = '#fdf6f9'; x.fillRect(0, H, W, bar); x.fillStyle = '#3d3346'; x.font = `700 ${fs}px sans-serif`;
   const T = TYPES[S.type], sub = T.subs.find((s) => s[0] === S.sub)?.[1] || '';
   const stl = STYLES.find((s) => s.id === S.style);
-  const parts = [`${T.e} ${T.n} ${sub}`, S.style !== 'none' ? stl.n : null, S.hair ? `헤어 ${S.hair.n}` : null,
+  const parts = [`${T.e} ${T.n} ${sub}`, aiCurrent() ? '✨AI 합성' : null, S.style !== 'none' ? stl.n : null, S.hair ? `헤어 ${S.hair.n}` : null,
     S.shape !== 'none' ? `안경 ${FRAMES[S.frame].n} ${SHAPES.find((s) => s.id === S.shape).n}` : null].filter(Boolean);
   x.fillText(parts.join(' · '), fs, H + bar / 2 + fs * 0.35, W - fs * 7);
   x.font = `500 ${Math.round(fs * 0.7)}px sans-serif`; x.fillStyle = '#8a7f93';
@@ -589,7 +721,7 @@ async function share() {
 }
 
 /* ------------------------------------------------------------------ UI */
-function rerender() { if (S.mode === 'still') renderStill(); }
+function rerender() { if (S.mode === 'still') renderStill(); updateAIUI(); }
 function renderTypes() {
   $('types').innerHTML = Object.entries(TYPES).map(([k, t]) => `<button class="type ${S.type === k ? 'on' : ''}" data-type="${k}" style="background:${t.bg}">${t.e}<span>${t.n}</span></button>`).join('');
   $('subs').innerHTML = TYPES[S.type].subs.map(([k, n]) => `<button class="sub ${S.sub === k ? 'on' : ''}" data-sub="${k}">${TYPES[S.type].n.split(' ')[0]} ${n}</button>`).join('');
@@ -679,7 +811,7 @@ function bindUI() {
 
 /* ------------------------------------------------------------------ boot */
 async function boot() {
-  renderTypes(); renderHair(); renderFrames(); renderShapes(); renderStyles(); bindUI();
+  renderTypes(); renderHair(); renderFrames(); renderShapes(); renderStyles(); bindUI(); bindAI();
   try { await loadModels(); }
   catch (e) { console.error(e); $('phText').textContent = 'AI 모델을 불러오지 못했어요. 인터넷 연결을 확인하고 새로고침 해주세요.'; setStatus('모델 로딩 실패'); return; }
   setStatus(`모델 준비 완료 (${delegate})`);

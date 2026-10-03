@@ -3,24 +3,44 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#f7dbe8">
+<meta name="theme-color" content="#faf8f4">
 <meta name="description" content="안경테 · 헤어 컬러 · 헤어스타일 실시간 가상 피팅 (퍼스널컬러 상담용, 사진은 기기 밖으로 전송되지 않음)">
-<title>퍼스널컬러 가상 피팅 · 안경 & 헤어</title>
+<title>H.O.W · 퍼스널컬러 가상 피팅</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
 <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="컬러피팅">
+<meta name="apple-mobile-web-app-title" content="H.O.W">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="application-name" content="컬러피팅">
+<meta name="application-name" content="H.O.W">
+<link rel="preload" href="assets/fonts/cormorant-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="style.css">
 </head>
-<body>
+<body class="cover-on">
+<div id="cover" class="cover" role="button" tabindex="0" aria-label="H.O.W 퍼스널컬러 가상 피팅 — 화면을 터치해 시작하세요">
+  <div class="cv-inner">
+    <h1 class="cv-mark">H.O.W</h1>
+    <span class="cv-rule" aria-hidden="true"></span>
+    <p class="cv-sub">퍼스널컬러 가상 피팅</p>
+    <div class="cv-tones" aria-label="봄 · 여름 · 가을 · 겨울"><i title="봄"></i><i title="여름"></i><i title="가을"></i><i title="겨울"></i></div>
+    <ol class="cv-steps">
+      <li><b>01</b>카메라를 바라보세요</li>
+      <li><b>02</b>퍼스널컬러 타입 선택</li>
+      <li><b>03</b>안경·헤어를 입혀보고 저장</li>
+    </ol>
+  </div>
+  <div class="cv-foot">
+    <p class="cv-tap">화면을 터치해 시작하세요</p>
+    <p class="cv-privacy">사진은 기기 안에서만 처리됩니다 · 전송·저장되지 않음</p>
+    <p class="cv-load" id="cvLoad">준비 중…</p>
+  </div>
+</div>
 <header class="top">
-  <div class="brand"><span class="logo">🎨</span><div><h1>퍼스널컬러 가상 피팅</h1><p>안경테 · 헤어 컬러 · 헤어스타일 실시간 테스트</p></div></div>
+  <div class="brand"><span class="wordmark">H.O.W</span><div><h1>퍼스널컬러 가상 피팅</h1><p>안경테 · 헤어 컬러 · 헤어스타일 실시간 테스트</p></div></div>
   <div class="top-right">
+    <button id="btnHome" class="home" title="표지로 (다음 고객)" aria-label="표지 화면으로">🏠<span>처음으로</span></button>
     <button id="btnInstall" class="install" hidden>📲 <span>앱 설치</span></button>
     <div class="modes" role="tablist">
       <button id="btnLive" class="mode on" role="tab">📷 라이브</button>

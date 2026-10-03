@@ -22,3 +22,6 @@
 
 ## assets/sample.jpg
 - Unchanged from earlier versions of the app.
+
+## Font
+- H.O.W wordmark: Cormorant Garamond (Catharsis Fonts), SIL Open Font License 1.1 — `assets/fonts/OFL.txt` (Latin subset, woff2)

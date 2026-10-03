@@ -799,15 +799,62 @@ function bindUI() {
 }
 
 /* ------------------------------------------------------------------ boot */
+/* ------------------------------------------------------------------ cover (intro) */
+// shown on every launch (in-store: one cover per customer); models load in the background, the camera is only requested after the tap
+const S0 = { ...S };
+let modelsReady = false, modelsFailed = false, coverResolve = null;
+const coverEl = $('cover');
+function coverLoad(t) { const e = $('cvLoad'); if (e) e.textContent = t; }
+function showCover() {
+  stopLoop();
+  if (stream) stream.getTracks().forEach((t) => t.stop()); stream = null; cameraOK = false; video.srcObject = null;
+  // fresh session for the next customer: default selections, no photo left on screen
+  Object.assign(S, S0, { mode: 'still' }); hairMask = null; lm = null; origHex = null; grainC = null; look = null; lastStillMasks = null;
+  rawC.width = rawC.height = 1; const vx = view.getContext('2d'); vx.clearRect(0, 0, view.width, view.height);
+  stage.classList.remove('is-still'); $('placeholder').classList.remove('hide'); $('phText').textContent = '카메라를 준비하는 중…';
+  $('intensity').value = 75; $('intensityVal').textContent = '75%'; $('gSize').value = 100; $('gSizeVal').textContent = '100%'; $('worstToggle').checked = false;
+  renderTypes(); renderHair(); renderFrames(); renderShapes(); renderStyles(); setStatus(''); $('fps').textContent = '';
+  coverEl.classList.remove('hide'); coverEl.hidden = false; document.body.classList.add('cover-on'); scrollTo(0, 0);
+  coverLoad(modelsReady ? '' : '준비 중…');
+  return new Promise((r) => { coverResolve = r; });
+}
+function hideCover() {
+  if (!coverResolve) return; const r = coverResolve; coverResolve = null;
+  coverEl.classList.add('hide'); document.body.classList.remove('cover-on');
+  r();
+}
+coverEl.addEventListener('click', hideCover);
+coverEl.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); hideCover(); } });
+async function startSession() { // after the cover tap
+  if (modelsFailed) return;
+  if (!modelsReady) { $('placeholder').classList.remove('hide'); $('phText').textContent = '모델을 불러오는 중이에요…'; await modelsP; if (modelsFailed) return; }
+  if (navigator.mediaDevices?.getUserMedia) {
+    $('phText').textContent = '카메라를 켜는 중… (권한을 허용해 주세요)';
+    // ask for the camera right away (inside the tap), but start the heavy live loop only once the fade has finished
+    const fade = new Promise((r) => setTimeout(r, 720));
+    try { if (!cameraOK) await startCamera(); } catch (e) { console.warn(e); }
+    await fade; await goLive();
+  } else showPhotoMode();
+}
+let modelsP = null;
 async function boot() {
   renderTypes(); renderHair(); renderFrames(); renderShapes(); renderStyles(); bindUI();
-  try { await loadModels(); }
-  catch (e) { console.error(e); $('phText').textContent = 'AI 모델을 불러오지 못했어요. 인터넷 연결을 확인하고 새로고침 해주세요.'; setStatus('모델 로딩 실패'); return; }
-  setStatus(`모델 준비 완료 (${delegate})`);
   const params = new URLSearchParams(location.search);
-  if (params.has('sample')) { await loadSample(); return; }
-  if (navigator.mediaDevices?.getUserMedia && !params.has('photo')) { $('phText').textContent = '카메라를 켜는 중… (권한을 허용해 주세요)'; await goLive(); }
-  else showPhotoMode();
+  const skipCover = params.has('nocover') || params.has('photo') || params.has('sample');
+  modelsP = loadModels().then(() => { modelsReady = true; coverLoad(''); setStatus(`모델 준비 완료 (${delegate})`); },
+    (e) => { console.error(e); modelsFailed = true; coverLoad('AI 모델을 불러오지 못했어요 · 인터넷 연결 확인 후 새로고침'); $('phText').textContent = 'AI 모델을 불러오지 못했어요. 인터넷 연결을 확인하고 새로고침 해주세요.'; setStatus('모델 로딩 실패'); });
+  $('btnHome').onclick = async () => { await showCover(); startSession(); };
+  if (skipCover) {
+    coverEl.classList.add('hide'); coverEl.hidden = true; document.body.classList.remove('cover-on');
+    await modelsP; if (modelsFailed) return;
+    if (params.has('sample')) { await loadSample(); return; }
+    if (navigator.mediaDevices?.getUserMedia && !params.has('photo')) { $('phText').textContent = '카메라를 켜는 중… (권한을 허용해 주세요)'; await goLive(); }
+    else showPhotoMode();
+    return;
+  }
+  const tap = new Promise((r) => { coverResolve = r; });
+  window.__pc.coverShown = true;
+  await tap; await startSession();
 }
 window.__pc.selectType = selectType;
 window.__pc.setHairByName = (n) => { S.hair = n === 'orig' ? null : Object.values(TYPES).flatMap((t) => t.hair).find((h) => h.n === n) || S.hair; renderHair(); rerender(); };

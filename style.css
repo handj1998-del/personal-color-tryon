@@ -126,3 +126,37 @@ button,label.pill,label.ctrl{font:inherit;cursor:pointer}
 @media (max-width:560px){.install{padding:7px 9px;font-size:13px}.install span{display:none}.top-right{gap:6px}}
 
 .seg[hidden],.pill[hidden]{display:none}
+/* ---------- cover / intro (H.O.W) ---------- */
+@font-face{font-family:"HOW Serif";src:url("assets/fonts/cormorant-latin.woff2") format("woff2");font-weight:300 700;font-display:swap}
+.wordmark{font-family:"HOW Serif","Cormorant Garamond",Didot,"Bodoni 72",Georgia,serif;font-weight:400;font-size:26px;letter-spacing:.08em;color:#2b2a28;line-height:1;padding-right:12px;margin-right:2px;border-right:1px solid #2b2a2833}
+.home{border:1px solid var(--line);background:#fff9;color:var(--ink);border-radius:999px;padding:8px 12px;font-weight:600;display:inline-flex;gap:6px;align-items:center}
+.home span{font-size:13px}
+@media (max-width:600px){.home span{display:none}.brand p{display:none}}
+body.cover-on{overflow:hidden}
+.cover{--ink2:#2b2a28;--mute2:#8f8a83;position:fixed;inset:0;z-index:50;display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden auto;cursor:pointer;
+  background:radial-gradient(120% 90% at 50% 38%,#fdfcf9 0%,#f7f4ee 70%,#f2eee6 100%);color:var(--ink2);opacity:1;transition:opacity .7s ease,visibility .7s;
+  padding:max(28px,env(safe-area-inset-top)) 24px max(22px,env(safe-area-inset-bottom));outline:none;user-select:none;-webkit-user-select:none}
+.cover.hide{opacity:0;visibility:hidden;pointer-events:none}
+.cv-inner{display:flex;flex-direction:column;align-items:center;text-align:center;margin:auto 0;transition:transform .7s ease,opacity .7s ease}
+.cover.hide .cv-inner{transform:translateY(-10px)}
+.cv-mark{margin:0;font-family:"HOW Serif","Cormorant Garamond",Didot,"Bodoni 72",Georgia,serif;font-weight:300;font-size:clamp(72px,17vmin,168px);line-height:1;letter-spacing:.1em;margin-right:-.1em;color:var(--ink2);
+  animation:cvIn 1.4s cubic-bezier(.2,.7,.2,1) both}
+.cv-rule{display:block;width:44px;height:1px;background:var(--ink2);opacity:.35;margin:clamp(18px,3.4vmin,30px) 0 clamp(14px,2.6vmin,22px);animation:cvIn 1.4s .15s both}
+.cv-sub{margin:0;font-size:clamp(13px,2vmin,17px);font-weight:400;letter-spacing:.42em;margin-right:-.42em;color:#55514b;animation:cvIn 1.4s .25s both}
+.cv-tones{display:flex;gap:8px;margin:clamp(26px,5vmin,46px) 0 0;animation:cvIn 1.4s .35s both}
+.cv-tones i{display:block;width:clamp(22px,3.4vmin,30px);height:3px;border-radius:2px;animation:cvTone 6s ease-in-out infinite}
+.cv-tones i:nth-child(1){background:#f2b8a0}.cv-tones i:nth-child(2){background:#b9c6e6;animation-delay:1.5s}.cv-tones i:nth-child(3){background:#c79c6e;animation-delay:3s}.cv-tones i:nth-child(4){background:#4b4767;animation-delay:4.5s}
+@keyframes cvTone{0%,100%{opacity:.55}25%{opacity:1}}
+@keyframes cvIn{from{opacity:0;transform:translateY(8px)}}
+.cv-steps{list-style:none;padding:0;margin:clamp(30px,6vmin,58px) 0 0;display:flex;gap:clamp(18px,4vmin,40px);font-size:clamp(12px,1.65vmin,14px);color:var(--mute2);letter-spacing:.02em;animation:cvIn 1.4s .45s both}
+.cv-steps b{font-family:"HOW Serif",Georgia,serif;font-weight:500;font-size:1.15em;color:var(--ink2);margin-right:7px;letter-spacing:.04em}
+.cv-foot{text-align:center;padding-top:20px;animation:cvIn 1.4s .6s both}
+.cv-tap{margin:0;font-size:clamp(13px,1.9vmin,15px);letter-spacing:.24em;margin-right:-.24em;color:var(--ink2);animation:cvBreathe 2.6s ease-in-out infinite}
+@keyframes cvBreathe{0%,100%{opacity:.35}50%{opacity:1}}
+.cv-privacy{margin:12px 0 0;font-size:11.5px;color:var(--mute2);letter-spacing:.04em}
+.cv-load{margin:6px 0 0;font-size:11px;color:#b5afa6;min-height:1em}
+@media (max-width:620px) and (orientation:portrait){.cv-steps{flex-direction:column;gap:10px;align-items:flex-start}}
+@media (max-height:500px) and (orientation:landscape){.cv-mark{font-size:clamp(56px,20vh,96px)}.cv-tones{margin-top:16px}.cv-steps{margin-top:18px}.cover{padding-top:16px}.cv-foot{padding-top:10px}}
+@media (prefers-reduced-motion:reduce){.cv-mark,.cv-rule,.cv-sub,.cv-tones,.cv-tones i,.cv-steps,.cv-foot,.cv-tap{animation:none}}
+@media (max-width:600px){.top{flex-wrap:wrap;padding-left:12px;padding-right:12px}.top-right{gap:6px}.mode{padding:7px 11px}.wordmark{font-size:22px}}
+@media (max-width:440px){.brand h1{display:none}.wordmark{border-right:0;padding-right:0}.install span{display:none}}

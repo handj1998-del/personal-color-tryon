@@ -57,6 +57,7 @@ const mk = (w = 1, h = 1) => { const c = document.createElement('canvas'); c.wid
 const rawC = mk(), rawX = rawC.getContext('2d', { willReadFrequently: true });
 const baseC = mk(), baseX = baseC.getContext('2d', { willReadFrequently: true });
 const outC = mk(), outX = outC.getContext('2d');
+const upC = mk(), upX = upC.getContext('2d');
 const recC = mk(), recX = recC.getContext('2d');
 const glassC = mk(), glassX = glassC.getContext('2d');
 const lensC = mk(), lensX = lensC.getContext('2d');
@@ -97,6 +98,7 @@ window.__pc = { S, stats, get lm() { return lm; }, get hairMask() { return hairM
 window.__pc.dbg = () => ({ photoCache, colorCache, cur: currentStyle() });
 if (new URLSearchParams(location.search).has('proc')) { S.procGlasses = true; S.procHair = true; }
 Object.defineProperty(window.__pc, 'outC', { get: () => outC });
+Object.defineProperty(window.__pc, 'viewC', { get: () => view });
 
 /* ------------------------------------------------------------------ utils */
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -213,6 +215,18 @@ function pushPull(px, w, h, known) {
   }
   return levels[0].C;
 }
+// customer's natural hairline (canonical y; lm10 = -0.98, chin = 1.39):
+//  - visible hairline from the hair mask when the forehead is open (mask edge sits a touch above the real roots -> bias down)
+//  - otherwise (bangs / no mask) the anatomical thirds rule from the brows: trichion ~ brow - (chin - brow) / 2
+function naturalHairline(P, mask) {
+  let browC = -0.42;
+  if (P && P.brows && P.aff) { const I = invAffine(P.aff); let a = 0; for (const q of P.brows) a += I.b * q.x + I.d * q.y + I.f; browC = a / P.brows.length; }
+  const anat = clamp(browC - (1.39 - browC) * 0.4, -1.3, -1.08);
+  const m = mask && mask.hairline;
+  // the segmenter only marks dense hair -> the visible hairline is a bit lower than its edge; prefer slight overlap over a skin gap
+  if (m != null && m < -1.0 && m > -1.6) return Math.max(clamp(m + 0.12, -1.35, -1.05) * 0.5 + anat * 0.5, -1.3);
+  return anat;
+}
 function buildSeg(masks, w, h, prev, lmP) {
   const hairRaw = masks[masks.length - 1];
   let m = hairRaw;
@@ -238,11 +252,12 @@ function buildSeg(masks, w, h, prev, lmP) {
   if (S.style !== 'none') {
     const dil = boxBlur(raw, w, h, Math.max(2, Math.round(w / 45)));
     // face-oval mask at seg resolution (inside the oval we fill with skin only, outside with background/clothes)
-    let inOval = null;
+    let inOval = null, faceOnly = null;
     if (P) {
       ensure(occC, w, h); occX.clearRect(0, 0, w, h); occX.fillStyle = '#fff'; occX.beginPath();
       P.oval.forEach((q, i) => { const x = q.x / segScaleX, y = q.y / segScaleY; i ? occX.lineTo(x, y) : occX.moveTo(x, y); });
       occX.closePath(); occX.fill();
+      { const od0 = occX.getImageData(0, 0, w, h).data; faceOnly = new Uint8Array(w * h); for (let i = 0; i < w * h; i++) faceOnly[i] = od0[i * 4 + 3] > 100 ? 1 : 0; }
       if (aff) { // forehead cap above the landmark oval (skin up to the real hairline)
         occX.beginPath(); [[-0.9, -0.75], [-0.86, -1.15], [-0.62, -1.42], [0, -1.55], [0.62, -1.42], [0.86, -1.15], [0.9, -0.75]].forEach(([cx, cy], i) => {
           const x = (aff.a * cx + aff.c * cy + aff.e) / segScaleX, y = (aff.b * cx + aff.d * cy + aff.f) / segScaleY; i ? occX.lineTo(x, y) : occX.moveTo(x, y); });
@@ -270,6 +285,8 @@ function buildSeg(masks, w, h, prev, lmP) {
         if (X < 0 || Y < 0 || X >= w || Y >= h) break; if (raw[Y * w + X] > 0.5) { acc += cy; cnt++; break; }
       }
       out.hairline = cnt ? Math.round(acc / cnt * 50) / 50 : null;
+      // live: smooth the estimate over frames (the low-res mask edge flickers)
+      if (prev && prev.hairline != null && out.hairline != null && Math.abs(prev.hairline - out.hairline) < 0.3) out.hairline = prev.hairline * 0.8 + out.hairline * 0.2;
     }
     // forehead cleanup: thin fringe strands are often missed by the (low-res) segmenter -> inside the forehead zone (above the eyelids,
     // outside the brows) any clearly non-skin pixel near the hair is treated as hair too, so the old fringe doesn't ghost through
@@ -300,7 +317,7 @@ function buildSeg(masks, w, h, prev, lmP) {
       }
       const fb = boxBlur(fore, w, h, Math.max(1, Math.round(w / 160))); for (let i = 0; i < w * h; i++) fore[i] = clamp(Math.max(fore[i], fb[i] * 2.2), 0, 1);
     }
-    const skinY = skin ? lumOf(skin) : 0;
+    const skinY = skin ? lumOf(skin) : 0, skinCr = skin ? [skin[0] / (skin[0] + skin[1] + skin[2] + 1), skin[1] / (skin[0] + skin[1] + skin[2] + 1)] : null;
     // below the brows the (blurry) segmenter bleeds onto real skin -> only remove confident hair there
     const browLowY = P && P.brows ? [...P.brows.slice(5, 10), ...P.brows.slice(15, 20)].reduce((s2, q) => s2 + q.y, 0) / 10 / segScaleY : 1e9;
     const known = new Float32Array(w * h), knownSkin = new Float32Array(w * h), hole = new Float32Array(w * h);
@@ -308,10 +325,17 @@ function buildSeg(masks, w, h, prev, lmP) {
       let hv = inOval && inOval[i] ? (Math.floor(i / w) > browLowY ? clamp(raw[i] * 2.6 - 1.0, 0, 1) : clamp(raw[i] * 3.5 - 0.45, 0, 1)) : clamp(dil[i] * 3.2 - 0.15, 0, 1);
       if (fore && fore[i] > hv) hv = fore[i];
       if (prot && inOval[i]) hv *= 1 - prot[i];
+      if (skin && faceOnly && inOval[i] && !faceOnly[i] && hv < 1) { // cap above the face oval: anything not clearly skin (faint hair edges) is replaced
+        const j = i * 4, d = Math.abs(px[j] - skin[0]) + Math.abs(px[j + 1] - skin[1]) + Math.abs(px[j + 2] - skin[2]);
+        hv = Math.max(hv, clamp((d - 40) / 40, 0, 1));
+      }
       hole[i] = hv;
       known[i] = hv > 0.05 || (inOval && inOval[i]) ? 0 : 1; // background/clothes only
-      if (hv < 0.05 && inOval && inOval[i]) { // skin-coloured pixels only (no brows/eyes/lips)
-        if (!skin) knownSkin[i] = 1; else { const j = i * 4, d = Math.abs(px[j] - skin[0]) + Math.abs(px[j + 1] - skin[1]) + Math.abs(px[j + 2] - skin[2]); const Ly = 0.299 * px[j] + 0.587 * px[j + 1] + 0.114 * px[j + 2]; knownSkin[i] = d < 70 || (d < 100 && Ly > skinY && Ly < skinY * 1.1) ? 1 : 0; }
+      if (hv < 0.05 && faceOnly && faceOnly[i]) { // skin-coloured pixels only (no brows/eyes/lips); real face only (the cap above may hold wall/background)
+        if (!skin) knownSkin[i] = 1; else if (!(prot && prot[i] > 0.2)) { // skin by chromaticity (lighting-independent) + a luminance window (no brows/lashes/shadows)
+          const j = i * 4, sum = px[j] + px[j + 1] + px[j + 2] + 1, Ly = 0.299 * px[j] + 0.587 * px[j + 1] + 0.114 * px[j + 2];
+          const dc = Math.abs(px[j] / sum - skinCr[0]) + Math.abs(px[j + 1] / sum - skinCr[1]);
+          knownSkin[i] = dc < 0.07 && Ly > skinY * 0.62 && Ly < Math.min(250, skinY * 1.9) ? 1 : 0; }
       }
     }
     const filled = pushPull(px, w, h, known), skinFill = inOval ? pushPull(px, w, h, knownSkin) : null;
@@ -336,12 +360,28 @@ function buildSeg(masks, w, h, prev, lmP) {
     // synthesized forehead skin isn't flat: soft frontal highlight in the middle, slight falloff toward the temples/hairline
     let fcx = 0, fcy = 0, frx = 1, fry = 1;
     if (aff) { fcx = (aff.c * -0.7 + aff.e) / segScaleX; fcy = (aff.d * -0.7 + aff.f) / segScaleY; frx = Math.hypot(aff.a, aff.b) / segScaleX * 0.75; fry = Math.hypot(aff.c, aff.d) / segScaleY * 0.5; }
+    // forehead skin tone (upper forehead, real skin only): the cap above the landmark oval continues this tone instead of a muddy average
+    let fhRGB = null, IA = null; const upH = aff ? new ImageData(w, h) : null;
+    if (aff && skinFill) {
+      IA = invAffine({ a: aff.a / segScaleX, b: aff.b / segScaleY, c: aff.c / segScaleX, d: aff.d / segScaleY, e: aff.e / segScaleX, f: aff.f / segScaleY });
+      let r = 0, g = 0, b = 0, n = 0;
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const i = y * w + x; if (!knownSkin[i]) continue; const cx = IA.a * x + IA.c * y + IA.e, cy = IA.b * x + IA.d * y + IA.f;
+        if (cy < -0.6 && cy > -1.1 && Math.abs(cx) < 0.55) { const j = i * 4; r += px[j]; g += px[j + 1]; b += px[j + 2]; n++; } }
+      if (n > 12) fhRGB = [r / n, g / n, b / n]; out.fhRGB = fhRGB; out.fhN = n; { let c1 = 0, c2 = 0, c3 = 0, c4 = 0; for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const i = y * w + x, cx = IA.a * x + IA.c * y + IA.e, cy = IA.b * x + IA.d * y + IA.f; if (cy < -0.6 && cy > -1.1 && Math.abs(cx) < 0.55) { c1++; if (faceOnly[i]) c2++; if (hole[i] < 0.05) c3++; if (knownSkin[i]) c4++; } } out.fhDbg = [c1, c2, c3, c4]; }
+    }
     for (let i = 0; i < w * h; i++) {
       const sk2 = skinFill && inOval[i], src = sk2 ? skinFill : refl;
-      let m = 1;
-      if (sk2 && aff) { const dx = (i % w - fcx) / frx, dy = (Math.floor(i / w) - fcy) / fry, r2 = dx * dx + dy * dy; m = 1 + 0.03 * Math.exp(-r2 * 1.6) - 0.14 * Math.min(1, Math.max(0, r2 - 0.6)); }
-      fid.data[i * 4] = src[i * 3] * m; fid.data[i * 4 + 1] = src[i * 3 + 1] * m; fid.data[i * 4 + 2] = src[i * 3 + 2] * m; fid.data[i * 4 + 3] = hole[i] * 255;
+      let m = 1, R = src[i * 3], G = src[i * 3 + 1], B = src[i * 3 + 2];
+      if (sk2 && aff) { const dx = (i % w - fcx) / frx, dy = (Math.floor(i / w) - fcy) / fry, r2 = dx * dx + dy * dy; m = 1 + 0.03 * Math.exp(-r2 * 1.6) - 0.08 * Math.min(1, Math.max(0, r2 - 0.8)); }
+      if (sk2 && fhRGB && hole[i] > 0.02) { // upper forehead / temples / cap: blend toward the forehead tone, very slightly darker toward the hair
+        const x = i % w, y = (i - x) / w, cy = IA.b * x + IA.d * y + IA.f, t = clamp((-0.95 - cy) / 0.25, 0, 1);
+        const k2 = faceOnly[i] ? 0.6 * clamp((-0.4 - cy) / 0.3, 0, 1) : 0.75 * t + 0.25;
+        R = R * (1 - k2) + fhRGB[0] * k2; G = G * (1 - k2) + fhRGB[1] * k2; B = B * (1 - k2) + fhRGB[2] * k2; m = 1 - 0.05 * t;
+      }
+      fid.data[i * 4] = R * m; fid.data[i * 4 + 1] = G * m; fid.data[i * 4 + 2] = B * m; fid.data[i * 4 + 3] = hole[i] * 255;
+      if (upH && IA && faceOnly[i]) { const x = i % w, y = (i - x) / w, cy = IA.b * x + IA.d * y + IA.f, cx = IA.a * x + IA.c * y + IA.e; upH.data[i * 4 + 3] = hole[i] * 255 * clamp((-0.35 - cy) / 0.2, 0, 1) * clamp((Math.abs(cx) - 0.5) / 0.15, 0, 1); }
     }
+    out.upHole = upH; // synthesized (formerly hair-covered) skin inside the upper face oval: the new hair may show there
     out.fill = fid;
   }
   return out;
@@ -421,7 +461,23 @@ function photoStyle(id, bang) {
     }
     const back = mk(TW, TH); back.getContext('2d').putImageData(bk, 0, 0);
     let front = null; if (fsum > 255 * 400) { front = mk(TW, TH); front.getContext('2d').putImageData(fr, 0, 0); }
-    ent.st = { back, front, id: 'p:' + id, bang: b, g: st0.g, ears: !!st0.ears, photo: true, hl: (e.hl || {})[b] }; ent.ready = true;
+    // underlay: a blurred, dilated copy of the hair next to the face (temples/sides/jaw), drawn darker underneath, so no skin/background
+    // gap can open between the hair's inner edge and the customer's face oval (the oval occluder covers it where the face is)
+    const q = 4, uw = TW / q, uh = TH / q, u = mk(uw, uh), ux = u.getContext('2d', { willReadFrequently: true });
+    const all = mk(TW, TH); all.getContext('2d').drawImage(img, 0, 0, TW, TH);
+    { const ax = all.getContext('2d'); const d = ax.getImageData(0, 0, TW, TH); for (let i = 0; i < d.data.length; i += 4) d.data[i + 1] = 128; ax.putImageData(d, 0, 0); }
+    ux.filter = 'blur(12px)'; ux.drawImage(all, 0, 0, uw, uh); ux.filter = 'none';
+    const ud = ux.getImageData(0, 0, uw, uh);
+    for (let y = 0; y < uh; y++) for (let x = 0; x < uw; x++) {
+      const i = (y * uw + x) * 4, cx = -3 + (x + 0.5) * q / 180, cy = -2.8 + (y + 0.5) * q / 180, ax2 = Math.abs(cx);
+      const side = clamp((ax2 - (cy < -0.35 ? 0.58 : 0.42)) / 0.12, 0, 1), low = clamp((cy + 0.35) / 0.15, 0, 1), ex = cx / 1.18, ey = (cy - 0.15) / 1.5, band = clamp((1 - (ex * ex + ey * ey)) / 0.12, 0, 1);
+      const a = ud.data[i + 3]; if (a) { const inv = 255 / a; ud.data[i] = Math.min(255, ud.data[i]); }
+      const tz = clamp((ax2 - 0.5) / 0.15, 0, 1) * clamp((1.05 - ax2) / 0.1, 0, 1) * clamp((cy + 1.4) / 0.15, 0, 1) * clamp((-0.4 - cy) / 0.2, 0, 1); // upper temples
+      ud.data[i + 3] = Math.min(255, a * (4 + 12 * tz)) * Math.max(side, low) * Math.max(band, tz); ud.data[i + 1] = 128;
+    }
+    ux.putImageData(ud, 0, 0);
+    const under = mk(TW, TH); { const ux2 = under.getContext('2d'); ux2.imageSmoothingQuality = 'high'; ux2.drawImage(u, 0, 0, TW, TH); }
+    ent.st = { back, front, under, id: 'p:' + id, bang: b, g: st0.g, ears: !!st0.ears, photo: true, hl: (e.hl || {})[b] }; ent.ready = true;
     if (S.style === id) rerender();
   };
   img.onerror = () => { ent.failed = true; };
@@ -456,7 +512,7 @@ function coloredStyle(st) {
   const hex = styleHex(), lk = styleLook(), key = st.id + '|' + st.bang + '|' + hex + '|' + lk.light + '|' + lk.expo + '|' + lk.skin;
   if (!colorCache[key]) {
     if (Object.keys(colorCache).length > 8) for (const k in colorCache) delete colorCache[k];
-    const o = { ...lk, photo: !!st.photo }; colorCache[key] = { back: colorize(st.back, hex, hairLUT, o), front: st.front ? colorize(st.front, hex, hairLUT, o) : null };
+    const o = { ...lk, photo: !!st.photo }; colorCache[key] = { back: colorize(st.back, hex, hairLUT, o), front: st.front ? colorize(st.front, hex, hairLUT, o) : null, under: st.under ? colorize(st.under, hex, hairLUT, o) : null };
   }
   return colorCache[key];
 }
@@ -482,12 +538,15 @@ function compose(W, H, P, mask) {
       }
     }
     let HA = P.aff;
-    if (st.photo && st.hl && st.hl < -0.9 && st.id !== 'p:ponytail' && mask && mask.hairline && mask.hairline > st.hl) { // customer's hairline is lower: stretch the hair down (about the crown)
-      const k = clamp((mask.hairline + 2.0) / (st.hl + 2.0), 1, 1.12), A = P.aff;
+    if (st.photo && st.hl && st.hl < -0.9) { // fit the template's hairline onto the customer's natural hairline (scale about the crown)
+      const tgt = naturalHairline(P, mask);
+      const k = clamp((tgt + 2.0) / (st.hl + 2.0), 1, 1.3), A = P.aff;
       HA = { a: A.a, b: A.b, c: A.c * k, d: A.d * k, e: A.e + A.c * -2.0 * (1 - k), f: A.f + A.d * -2.0 * (1 - k) };
+      stats.hairFit = { tgt: +tgt.toFixed(3), hl: st.hl, k: +k.toFixed(3) };
     }
     const col = coloredStyle(st), T = templateTransform(HA);
     outX.drawImage(baseC, 0, 0);
+    if (col.under && !S.dbgNoUnder) { outX.save(); outX.setTransform(...T); outX.filter = st.g === 'm' ? 'brightness(0.8) blur(2px)' : 'brightness(0.7)'; outX.drawImage(col.under, 0, 0); outX.restore(); }
     if (!S.dbgNoBack) { outX.save(); outX.setTransform(...T); outX.imageSmoothingQuality = 'high'; outX.drawImage(col.back, 0, 0); outX.restore(); }
     // occluder = face oval (+ neck) from the hair-free base image
     const ow = Math.round(W / 4), oh = Math.round(H / 4);
@@ -502,6 +561,7 @@ function compose(W, H, P, mask) {
     occ2X.fillStyle = '#fff'; occ2X.beginPath();
     P.oval.forEach((p, i) => { const x = (p.x + (cx - p.x) * 0.02) * kx, y = (p.y + (cy - p.y) * 0.02) * ky; i ? occ2X.lineTo(x, y) : occ2X.moveTo(x, y); });
     occ2X.closePath(); occ2X.fill();
+    if (st.photo && mask && mask.upHole) { ensure(upC, mask.w, mask.h); upX.putImageData(mask.upHole, 0, 0); occ2X.globalCompositeOperation = 'destination-out'; occ2X.imageSmoothingEnabled = true; occ2X.drawImage(upC, 0, 0, ow, oh); occ2X.globalCompositeOperation = 'source-over'; }
     // feather the hairline: fade the top of the forehead so the hair behind shows through softly
     const fh = Math.hypot(P.chin.x - P.top.x, P.chin.y - P.top.y), ux = (P.chin.x - P.top.x) / fh, uy = (P.chin.y - P.top.y) / fh;
     const g = occ2X.createLinearGradient(P.top.x * kx, P.top.y * ky, (P.top.x + ux * fh * 0.09) * kx, (P.top.y + uy * fh * 0.09) * ky);
@@ -538,6 +598,12 @@ function compose(W, H, P, mask) {
     if (S.hair) applyHair(outX, W, H, mask, S.hair.c, S.intensity);
   }
   const t1 = performance.now(); stats.hairMs = stats.hairMs * 0.9 + (t1 - t0) * 0.1;
+  hiScale = calcHiScale(W, H);
+  if (hiScale === 1) glassesPass(outX, W, H, P);
+  stats.glassMs = stats.glassMs * 0.9 + (performance.now() - t1) * 0.1;
+}
+function glassesPass(outX, W, H, P) {
+  ensure(glassC, W, H); ensure(lensC, W, H); ensure(tintC, W, H);
   if (P && S.shape !== 'none') {
     const sdef = S.style !== 'none' ? STYLES.find((q) => q.id === S.style) : null;
     const hideT = !!(sdef && sdef.g === 'f' && !sdef.ears);
@@ -555,20 +621,42 @@ function compose(W, H, P, mask) {
     if (photo) {
       // lens: slight darkening of what is behind, then reflections (screen)
       outX.save(); outX.globalCompositeOperation = 'source-over'; outX.globalAlpha = 0.07;
-      outX.drawImage(lensDark(), 0, 0); outX.globalAlpha = 0.45; outX.globalCompositeOperation = 'screen'; outX.drawImage(lensC, 0, 0); outX.restore();
+      outX.drawImage(lensDark(), 0, 0); outX.globalAlpha = 0.38; outX.globalCompositeOperation = 'screen'; outX.drawImage(lensC, 0, 0); outX.restore();
       if (photo === 'tint') { outX.save(); outX.globalCompositeOperation = 'multiply'; outX.drawImage(tintC, 0, 0); outX.restore(); }
     }
     outX.drawImage(glassC, 0, 0);
   }
-  stats.glassMs = stats.glassMs * 0.9 + (performance.now() - t1) * 0.1;
+}
+// glasses are drawn at display resolution (canvas px = CSS px x devicePixelRatio) on top of the upscaled photo/video frame,
+// so rims, hinges and reflections stay crisp instead of being upscaled with a low-res live frame
+let hiScale = 1;
+const paneC = mk(), paneX = paneC.getContext('2d');
+function calcHiScale(W, H) {
+  if (S.noHiGlasses || !stage.clientWidth) return 1;
+  const tw = S.compare === 'split' ? W * 2 : W, fit = Math.min(stage.clientWidth / tw, stage.clientHeight / H) * (window.devicePixelRatio || 1);
+  let s = Math.min(2.5, Math.max(1, fit), 2600 / Math.max(tw, H));
+  s = Math.round(s * 4) / 4; return s < 1.2 ? 1 : s;
+}
+function scaleP(o, s) {
+  if (Array.isArray(o)) return o.map((v) => scaleP(v, s));
+  if (o && typeof o === 'object') {
+    if ('a' in o && 'd' in o && 'e' in o && 'f' in o && 'b' in o && 'c' in o) return { a: o.a * s, b: o.b * s, c: o.c * s, d: o.d * s, e: o.e * s, f: o.f * s };
+    const r = {}; for (const k in o) { const v = o[k]; r[k] = (k === 'x' || k === 'y' || k === 'z') && typeof v === 'number' ? v * s : scaleP(v, s); } return r;
+  }
+  return o;
 }
 function present(target = view, labels = true) {
-  const W = rawC.width, H = rawC.height, split = S.compare === 'split', tw = split ? W * 2 : W;
+  const sc = hiScale, W0 = rawC.width, H0 = rawC.height, W = Math.round(W0 * sc), H = Math.round(H0 * sc), split = S.compare === 'split', tw = split ? W * 2 : W;
   if (target.width !== tw || target.height !== H) { target.width = tw; target.height = H; }
-  const x = target.getContext('2d');
-  const panes = split ? [[rawC, 0, '원본 BEFORE'], [outC, W, 'AFTER']] : [[S.holdBefore ? rawC : outC, 0, S.holdBefore ? '원본' : '']];
+  const x = target.getContext('2d'); x.imageSmoothingEnabled = true; x.imageSmoothingQuality = 'high';
+  let after = outC;
+  if (sc !== 1 && !S.holdBefore) { // hi-res pass: upscale the composed frame, then draw the glasses at full resolution
+    ensure(paneC, W, H); paneX.imageSmoothingEnabled = true; paneX.imageSmoothingQuality = 'high'; paneX.drawImage(outC, 0, 0, W, H);
+    if (lm) glassesPass(paneX, W, H, scaleP(lm, sc)); after = paneC;
+  }
+  const panes = split ? [[rawC, 0, '원본 BEFORE'], [after, W, 'AFTER']] : [[S.holdBefore ? rawC : after, 0, S.holdBefore ? '원본' : '']];
   for (const [src, ox, label] of panes) {
-    x.save(); if (mirror) { x.translate(ox + W, 0); x.scale(-1, 1); x.drawImage(src, 0, 0); } else x.drawImage(src, ox, 0); x.restore();
+    x.save(); if (mirror) { x.translate(ox + W, 0); x.scale(-1, 1); x.drawImage(src, 0, 0, W, H); } else x.drawImage(src, ox, 0, W, H); x.restore();
     if (labels && label) {
       const fs = Math.max(14, Math.round(H / 26)); x.font = `700 ${fs}px sans-serif`;
       const tw2 = x.measureText(label).width + fs; x.fillStyle = 'rgba(255,255,255,0.85)';

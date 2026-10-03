@@ -150,11 +150,20 @@ export function drawGlasses(ctx, P, frameId, shapeId, gScale, accentWarm, hideTe
     if (earLocal > hx + 0.02) {
       const end = toScreen(sd, hx + (earLocal - hx) * 0.9, hingeY + 0.08);
       ctx.setTransform(1, 0, 0, 1, 0, 0);
-      const base = isMetalF ? F.c : F.kind === 'grad' ? F.c : F.kind === 'clear' ? rgba(F.c, 0.8) : F.c;
+      const base = isMetalF ? F.c : F.kind === 'grad' ? F.c : F.kind === 'clear' ? rgba(F.c, 0.5) : F.c;
       const g = ctx.createLinearGradient(hinge.x, hinge.y, end.x, end.y);
       g.addColorStop(0, base); g.addColorStop(0.75, base); g.addColorStop(1, 'rgba(0,0,0,0)');
-      ctx.strokeStyle = g; ctx.lineCap = 'round'; ctx.lineWidth = Math.max(1.5, (wire ? 0.07 : 0.13) * u);
+      // real temples are slim (wire ~1.2 mm, acetate ~3 mm seen edge-on from the front), with a darker underside
+      const lw = Math.max(1.2, (wire ? 0.042 : 0.085) * u);
+      ctx.strokeStyle = g; ctx.lineCap = 'round'; ctx.lineWidth = lw;
       ctx.beginPath(); ctx.moveTo(hinge.x, hinge.y); ctx.lineTo(end.x, end.y); ctx.stroke();
+      const nx = -(end.y - hinge.y), ny = end.x - hinge.x, nl = Math.hypot(nx, ny) || 1, ox = nx / nl * lw * 0.28, oy = ny / nl * lw * 0.28;
+      ctx.globalAlpha = 0.35; ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = Math.max(0.6, lw * 0.22);
+      ctx.beginPath(); ctx.moveTo(hinge.x - ox, hinge.y - oy); ctx.lineTo(hinge.x + (end.x - hinge.x) * 0.7 - ox, hinge.y + (end.y - hinge.y) * 0.7 - oy); ctx.stroke(); ctx.globalAlpha = 1;
+      if (F.kind === 'clear') { // metal core wire visible inside clear acetate temples
+        ctx.strokeStyle = 'rgba(150,150,155,0.7)'; ctx.lineWidth = Math.max(0.6, lw * 0.18);
+        ctx.beginPath(); ctx.moveTo(hinge.x, hinge.y); ctx.lineTo(hinge.x + (end.x - hinge.x) * 0.8, hinge.y + (end.y - hinge.y) * 0.8); ctx.stroke();
+      }
     }
   }
   if (templesOnly) { ctx.setTransform(1, 0, 0, 1, 0, 0); return; }

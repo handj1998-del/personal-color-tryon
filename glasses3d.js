@@ -31,7 +31,7 @@ export function variantKey(shapeId, frameId) {
 }
 // gradient map: luminance -> lo .. c .. hi .. white
 function metalLUT(M) {
-  const lo = hex(M.lo), c = hex(M.c), hi = hex(M.hi), stops = [[0, [lo[0] * 0.35, lo[1] * 0.35, lo[2] * 0.35]], [0.22, lo], [0.5, c], [0.8, hi], [1, [255, 255, 250]]];
+  const lo = hex(M.lo), c = hex(M.c), hi = hex(M.hi), stops = [[0, [lo[0] * 0.2, lo[1] * 0.2, lo[2] * 0.2]], [0.18, [lo[0] * 0.7, lo[1] * 0.7, lo[2] * 0.7]], [0.42, c], [0.72, hi], [0.9, [255, 253, 245]], [1, [255, 255, 255]]];
   const lut = new Uint8ClampedArray(256 * 3);
   for (let i = 0; i < 256; i++) {
     const t = i / 255; let j = 0; while (j < stops.length - 2 && t > stops[j + 1][0]) j++;
@@ -41,15 +41,19 @@ function metalLUT(M) {
   return lut;
 }
 function tortoiseField(W, H, F) {
+  // layered tortoiseshell: soft amber base mottling + many small elongated dark flecks + a few crisp dark specks
+  // (scaled to the asset resolution; flecks are stretched along the frame like real cut acetate)
   const c = document.createElement('canvas'); c.width = W; c.height = H; const x = c.getContext('2d');
-  x.fillStyle = F.c; x.fillRect(0, 0, W, H);
+  const q = W / 800; x.fillStyle = F.c; x.fillRect(0, 0, W, H);
   let seed = 11; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
-  x.filter = 'blur(3px)';
-  for (let i = 0; i < 420; i++) {
-    const px = rnd() * W, py = rnd() * H, r = 6 + rnd() * 26; const [sr, sg, sb] = hex(F.spot);
-    x.fillStyle = `rgba(${sr},${sg},${sb},${0.35 + rnd() * 0.55})`; x.beginPath(); x.ellipse(px, py, r * 1.8, r * 0.8, -0.5 + rnd() * 0.6, 0, 7); x.fill();
-  }
-  for (let i = 0; i < 160; i++) { const px = rnd() * W, py = rnd() * H, r = 3 + rnd() * 10; x.fillStyle = 'rgba(232,170,90,0.30)'; x.beginPath(); x.ellipse(px, py, r * 1.5, r, 0, 0, 7); x.fill(); }
+  const [sr, sg, sb] = hex(F.spot);
+  x.filter = `blur(${(4 * q).toFixed(1)}px)`;
+  for (let i = 0; i < 110; i++) { const px = rnd() * W, py = rnd() * H, r = (14 + rnd() * 26) * q; x.fillStyle = `rgba(${sr},${sg},${sb},${0.35 + rnd() * 0.35})`; x.beginPath(); x.ellipse(px, py, r * 1.5, r * 0.9, -0.3 + rnd() * 0.6, 0, 7); x.fill(); }
+  for (let i = 0; i < 40; i++) { const px = rnd() * W, py = rnd() * H, r = (5 + rnd() * 10) * q; x.fillStyle = `rgba(214,150,76,${0.12 + rnd() * 0.15})`; x.beginPath(); x.ellipse(px, py, r * 1.4, r, rnd() - 0.5, 0, 7); x.fill(); }
+  x.filter = `blur(${(1.6 * q).toFixed(1)}px)`;
+  for (let i = 0; i < 700; i++) { const px = rnd() * W, py = rnd() * H, r = (2 + rnd() * rnd() * 9) * q; x.fillStyle = `rgba(${sr},${sg},${sb},${0.4 + rnd() * 0.45})`; x.beginPath(); x.ellipse(px, py, r * (1.1 + rnd() * 0.7), r * 0.8, rnd() * 3, 0, 7); x.fill(); }
+  x.filter = 'none';
+  for (let i = 0; i < 200; i++) { const px = rnd() * W, py = rnd() * H, r = (0.8 + rnd() * 1.6) * q; x.fillStyle = `rgba(${sr * 0.6 | 0},${sg * 0.6 | 0},${sb * 0.6 | 0},${0.5 + rnd() * 0.4})`; x.beginPath(); x.ellipse(px, py, r * 1.3, r, rnd() * 3, 0, 7); x.fill(); }
   return x.getImageData(0, 0, W, H).data;
 }
 function colorize(key, frameId, accentWarm) {
@@ -65,7 +69,7 @@ function colorize(key, frameId, accentWarm) {
   // metal layer
   const isMetal = F.kind === 'metal';
   const metalOf = (q) => q.kind === 'metal' ? q : { c: q.c, hi: mixh(q.c, '#ffffff', 0.55), lo: mixh(q.c, '#000000', 0.5) };
-  const M = isMetal ? F : thick ? (accentWarm ? FRAMES.gold : FRAMES.silver) : metalOf(F);
+  const M = isMetal ? F : thick ? (accentWarm && F.kind !== 'clear' ? FRAMES.gold : FRAMES.silver) : metalOf(F);
   if (im) {
     const d = pixels(im).data, lut = metalLUT(M);
     for (let i = 0; i < W * H; i++) { const a = d[i * 4 + 3]; if (!a) continue; const l = d[i * 4] * 3; o[i * 4] = lut[l]; o[i * 4 + 1] = lut[l + 1]; o[i * 4 + 2] = lut[l + 2]; o[i * 4 + 3] = a; }
@@ -78,12 +82,12 @@ function colorize(key, frameId, accentWarm) {
     if (AF.kind === 'clear') { tintC = document.createElement('canvas'); tintC.width = W; tintC.height = H; tintImg = tintC.getContext('2d').createImageData(W, H); }
     const td = tintImg ? tintImg.data : null;
     // vertical extent of acetate for gradient frames
-    const y0 = H * 0.5 - 0.75 * 160, y1 = H * 0.5 + 0.55 * 160;
+    const PU = manifest.px_per_unit || 160, y0 = H * 0.5 - 0.75 * PU, y1 = H * 0.5 + 0.55 * PU;
     for (let y = 0; y < H; y++) {
       const gy = Math.min(1, Math.max(0, (y - y0) / (y1 - y0)));
       for (let x = 0; x < W; x++) {
         const i = y * W + x, a = d[i * 4 + 3]; if (!a) continue;
-        const diff = d[i * 4] / 255 * 1.25, spec = d[i * 4 + 1] * specK;
+        const diff = d[i * 4] / 255 * 1.25, s0 = d[i * 4 + 1] / 255, spec = (AF.kind === 'clear' ? s0 * 255 : Math.pow(s0, 1.7) * 330) * specK; // glossy acetate: dark body, crisp highlights
         let r = base[0], g = base[1], b = base[2], al = a;
         if (tort) { r = tort[i * 4]; g = tort[i * 4 + 1]; b = tort[i * 4 + 2]; }
         if (c2) { const t = Math.max(0, (gy - 0.3) / 0.7); r += (c2[0] - r) * t; g += (c2[1] - g) * t; b += (c2[2] - b) * t; al = a * (1 - 0.45 * t); }
@@ -126,7 +130,7 @@ export function drawGlasses3D(ctx, lensCtx, P, frameId, shapeId, gScale, accentW
   const e = { x: dx / d, y: dy / d }, n = { x: -e.y, y: e.x };
   const t = Math.min(d * 0.7, Math.max(d * 0.3, (P.B.x - L.x) * e.x + (P.B.y - L.y) * e.y));
   const C = { x: L.x + e.x * t, y: L.y + e.y * t };
-  const g = gScale * 0.94, u = (d / 2) * g, k = 160, cx = res.W / 2, cy = res.H / 2;
+  const g = gScale * 0.94, u = (d / 2) * g, k = manifest.px_per_unit || 160, cx = res.W / 2, cy = res.H / 2;
   const sides = [{ s: (d - t) * g, sx: cx, sw: res.W - cx }, { s: t * g, sx: 0, sw: cx }];
   const jobs = [[ctx, res.frame], [lensCtx, res.lens]]; if (tintCtx && res.tint) jobs.push([tintCtx, res.tint]);
   for (const [target, src] of jobs) {

@@ -1,0 +1,152 @@
+{
+ "short_f": {
+  "bangs": {
+   "side": "short_f__side.png",
+   "full": "short_f__full.png"
+  },
+  "def": "side",
+  "hl": {
+   "side": -0.797,
+   "full": -0.463
+  }
+ },
+ "bob": {
+  "bangs": {
+   "none": "bob__none.png",
+   "full": "bob__full.png",
+   "seethrough": "bob__seethrough.png"
+  },
+  "def": "none",
+  "hl": {
+   "none": -0.49,
+   "full": -0.377,
+   "seethrough": -0.377
+  }
+ },
+ "layered_bob": {
+  "bangs": {
+   "seethrough": "layered_bob__seethrough.png",
+   "none": "layered_bob__none.png",
+   "full": "layered_bob__full.png"
+  },
+  "def": "seethrough",
+  "hl": {
+   "seethrough": -0.497,
+   "none": -0.43,
+   "full": -0.403
+  }
+ },
+ "ccurl": {
+  "bangs": {
+   "none": "ccurl__none.png",
+   "full": "ccurl__full.png",
+   "seethrough": "ccurl__seethrough.png"
+  },
+  "def": "none",
+  "hl": {
+   "none": -1.083,
+   "full": -0.37,
+   "seethrough": -0.39
+  }
+ },
+ "hush": {
+  "bangs": {
+   "seethrough": "hush__seethrough.png",
+   "none": "hush__none.png",
+   "full": "hush__full.png"
+  },
+  "def": "seethrough",
+  "hl": {
+   "seethrough": -0.35,
+   "none": -0.837,
+   "full": -0.363
+  }
+ },
+ "long": {
+  "bangs": {
+   "none": "long__none.png",
+   "full": "long__full.png",
+   "seethrough": "long__seethrough.png"
+  },
+  "def": "none",
+  "hl": {
+   "none": -1.077,
+   "full": -0.383,
+   "seethrough": -0.41
+  }
+ },
+ "wave": {
+  "bangs": {
+   "none": "wave__none.png",
+   "full": "wave__full.png"
+  },
+  "def": "none",
+  "hl": {
+   "none": -0.75,
+   "full": -0.363
+  }
+ },
+ "hippie": {
+  "bangs": {
+   "seethrough": "hippie__seethrough.png"
+  },
+  "def": "seethrough",
+  "hl": {
+   "seethrough": -0.523
+  }
+ },
+ "ponytail": {
+  "bangs": {
+   "none": "ponytail__none.png"
+  },
+  "def": "none",
+  "hl": {
+   "none": -1.13
+  }
+ },
+ "dandy": {
+  "bangs": {
+   "dandy": "dandy__dandy.png"
+  },
+  "def": "dandy",
+  "hl": {
+   "dandy": -0.643
+  }
+ },
+ "twoblock": {
+  "bangs": {
+   "dandy_short": "twoblock__dandy_short.png"
+  },
+  "def": "dandy_short",
+  "hl": {
+   "dandy_short": -0.623
+  }
+ },
+ "leaf": {
+  "bangs": {
+   "leaf": "leaf__leaf.png"
+  },
+  "def": "leaf",
+  "hl": {
+   "leaf": -0.51
+  }
+ },
+ "garma": {
+  "bangs": {
+   "garma": "garma__garma.png"
+  },
+  "def": "garma",
+  "hl": {
+   "garma": -0.67
+  }
+ },
+ "comma": {
+  "bangs": {
+   "comma": "comma__comma.png"
+  },
+  "def": "comma",
+  "hl": {
+   "comma": -0.597
+  }
+ }
+}

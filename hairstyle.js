@@ -295,12 +295,13 @@ export function colorize(src, hex, lutFn, opts = {}) {
   const c = document.createElement('canvas'); c.width = src.width; c.height = src.height; const x = c.getContext('2d');
   x.drawImage(src, 0, 0); const id = x.getImageData(0, 0, c.width, c.height), d = id.data; const lut = lutFn(hex, 112);
   const n = parseInt(hex.slice(1), 16), tl = 0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255);
-  const con = tl > 110 ? 0.62 : tl > 70 ? 0.78 : 0.95;   // light colours: less strand contrast (no streaks)
+  const con = tl > 110 ? 0.62 : tl > 70 ? 0.78 : 0.95;
+  const conP = opts.photo ? (tl > 110 ? 0.95 : tl > 70 ? 1.1 : 1.2) : con;   // light colours: less strand contrast (no streaks)
   const light = opts.light || 0, expo = opts.expo || 1, sk = opts.skin || [150, 115, 95];
   const colF = new Float32Array(TW); for (let u = 0; u < TW; u++) { const xc = Math.max(-1, Math.min(1, (X0 + u / SC) / 1.4)); colF[u] = expo * (1 + light * 0.24 * xc); }
   for (let i = 0, p = 0; i < d.length; i += 4, p++) {
     if (!d[i + 3]) continue;
-    const L = Math.max(0, Math.min(255, Math.round(112 + (d[i] - 112) * con))), j = L * 3;
+    const L = Math.max(0, Math.min(255, Math.round(112 + (d[i] - 112) * conP))), j = L * 3;
     let r = lut[j], g = lut[j + 1], b = lut[j + 2];
     const k = (d[i + 1] - 128) / 128;
     if (k > 0) { r += (r * 0.3 + 22 - r * 0.0) * k * 0.55; g += (g * 0.26 + 16) * k * 0.55; b += (b * 0.18 + 8) * k * 0.55; }

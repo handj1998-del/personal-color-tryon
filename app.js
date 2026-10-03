@@ -1,6 +1,6 @@
 // 퍼스널컬러 가상 피팅 — 100% client-side. Photos/video never leave the device.
 import { FRAMES, SHAPES, drawGlasses, shapeIconSVG, mix, rgba } from './frames.js';
-import { PROVIDERS, loadSettings, saveSettings, modelOf, generate as aiGenerate, errorMessage as aiErrorMessage, buildPrompt } from './ai.js';
+import { initGlasses3D, drawGlasses3D } from './glasses3d.js';
 import { STYLES, BANGS, OVAL_IDX, CANON, buildStyle, colorize, fitAffine, templateTransform, invAffine, styleIconSVG } from './hairstyle.js';
 
 const MP_VER = '1.0.1';
@@ -59,6 +59,9 @@ const baseC = mk(), baseX = baseC.getContext('2d', { willReadFrequently: true })
 const outC = mk(), outX = outC.getContext('2d');
 const recC = mk(), recX = recC.getContext('2d');
 const glassC = mk(), glassX = glassC.getContext('2d');
+const lensC = mk(), lensX = lensC.getContext('2d');
+const darkC = mk(), darkX = darkC.getContext('2d');
+function lensDark() { ensure(darkC, lensC.width, lensC.height); darkX.globalCompositeOperation = 'source-over'; darkX.clearRect(0, 0, darkC.width, darkC.height); darkX.drawImage(lensC, 0, 0); darkX.globalCompositeOperation = 'source-in'; darkX.fillStyle = '#000'; darkX.fillRect(0, 0, darkC.width, darkC.height); return darkC; }
 const shadowC = mk(), shadowX = shadowC.getContext('2d');
 const maskC = mk(), maskX = maskC.getContext('2d');
 const fillC = mk(), fillX = fillC.getContext('2d');
@@ -90,6 +93,9 @@ let lm = null;        // landmarks (key points + oval) in raw pixel coords
 let hairMask = null;  // {id, meanY, meanRGB, bbox, ...} + seg extras (fill, neck)
 const stats = { fps: 0, detMs: 0, segMs: 0, renderMs: 0, hairMs: 0, glassMs: 0, segEvery: 2, delegate: '', lastFps: [] };
 window.__pc = { S, stats, get lm() { return lm; }, get hairMask() { return hairMask; }, get origHex() { return origHex; }, render: () => renderStill() };
+window.__pc.dbg = () => ({ photoCache, colorCache, cur: currentStyle() });
+if (new URLSearchParams(location.search).has('proc')) { S.procGlasses = true; S.procHair = true; }
+Object.defineProperty(window.__pc, 'outC', { get: () => outC });
 
 /* ------------------------------------------------------------------ utils */
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -132,7 +138,7 @@ function extractLm(res, W, H, t) {
 
 /* ------------------------------------------------------------------ models */
 async function loadModels() {
-  setStatus('AI 모델 불러오는 중…');
+  setStatus('얼굴 인식 모델 불러오는 중…');
   MP = await import(MP_URL);
   const files = await MP.FilesetResolver.forVisionTasks(WASM_URL);
   mkFace = (d) => MP.FaceLandmarker.createFromOptions(files, {
@@ -231,7 +237,13 @@ function buildSeg(masks, w, h, prev, lmP) {
     if (P) {
       ensure(occC, w, h); occX.clearRect(0, 0, w, h); occX.fillStyle = '#fff'; occX.beginPath();
       P.oval.forEach((q, i) => { const x = q.x / segScaleX, y = q.y / segScaleY; i ? occX.lineTo(x, y) : occX.moveTo(x, y); });
-      occX.closePath(); occX.fill(); const od = occX.getImageData(0, 0, w, h).data; inOval = new Uint8Array(w * h); for (let i = 0; i < w * h; i++) inOval[i] = od[i * 4 + 3] > 100 ? 1 : 0;
+      occX.closePath(); occX.fill();
+      if (aff) { // forehead cap above the landmark oval (skin up to the real hairline)
+        occX.beginPath(); [[-0.9, -0.75], [-0.86, -1.15], [-0.62, -1.42], [0, -1.55], [0.62, -1.42], [0.86, -1.15], [0.9, -0.75]].forEach(([cx, cy], i) => {
+          const x = (aff.a * cx + aff.c * cy + aff.e) / segScaleX, y = (aff.b * cx + aff.d * cy + aff.f) / segScaleY; i ? occX.lineTo(x, y) : occX.moveTo(x, y); });
+        occX.closePath(); occX.fill();
+      }
+      const od = occX.getImageData(0, 0, w, h).data; inOval = new Uint8Array(w * h); for (let i = 0; i < w * h; i++) inOval[i] = od[i * 4 + 3] > 100 ? 1 : 0;
     }
     // skin reference sampled from both cheeks + forehead centre (not hair); also gives the photo's lighting
     const smp = (cx, cy) => { if (!aff) return null; const X = (aff.a * cx + aff.c * cy + aff.e) / segScaleX, Y = (aff.b * cx + aff.d * cy + aff.f) / segScaleY;
@@ -245,9 +257,18 @@ function buildSeg(masks, w, h, prev, lmP) {
     const lumOf = (c) => c ? 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2] : 0;
     out.skin = skin; out.light = cl && cr ? clamp((lumOf(cr) - lumOf(cl)) / (lumOf(cr) + lumOf(cl) + 1) * 2.5, -1, 1) : 0;
     out.expo = skin ? clamp(lumOf(skin) / 165, 0.55, 1.25) : 1;
+    // customer's hairline height at the forehead centre (canonical y), used to fit photo hairstyles
+    if (aff) {
+      let acc = 0, cnt = 0;
+      for (const cx of [-0.25, 0, 0.25]) for (let cy = -0.35; cy > -1.8; cy -= 0.02) {
+        const X = Math.round((aff.a * cx + aff.c * cy + aff.e) / segScaleX), Y = Math.round((aff.b * cx + aff.d * cy + aff.f) / segScaleY);
+        if (X < 0 || Y < 0 || X >= w || Y >= h) break; if (raw[Y * w + X] > 0.5) { acc += cy; cnt++; break; }
+      }
+      out.hairline = cnt ? Math.round(acc / cnt * 50) / 50 : null;
+    }
     const known = new Float32Array(w * h), knownSkin = new Float32Array(w * h), hole = new Float32Array(w * h);
     for (let i = 0; i < w * h; i++) {
-      const hv = clamp(dil[i] * 3.2 - 0.15, 0, 1); hole[i] = hv;
+      const hv = inOval && inOval[i] ? clamp(raw[i] * 2.5 - 0.6, 0, 1) : clamp(dil[i] * 3.2 - 0.15, 0, 1); hole[i] = hv;
       known[i] = hv > 0.05 || (inOval && inOval[i]) ? 0 : 1; // background/clothes only
       if (hv < 0.05 && inOval && inOval[i]) { // skin-coloured pixels only (no brows/eyes/lips)
         if (!skin) knownSkin[i] = 1; else { const j = i * 4, d = Math.abs(px[j] - skin[0]) + Math.abs(px[j + 1] - skin[1]) + Math.abs(px[j + 2] - skin[2]); knownSkin[i] = d < 70 ? 1 : 0; }
@@ -331,8 +352,42 @@ function applyHair(ctx, W, H, mask, hex, intensity) {
 /* ------------------------------------------------------------------ hairstyle templates */
 const styleCache = {}, colorCache = {};
 let origHex = null;
+// photoreal hair templates (assets/hair/*.png: R=luminance, G=front weight, A=alpha, canonical space at half res)
+let HAIRP = null; const photoCache = {};
+fetch(new URL('./assets/hair/hair.json', import.meta.url)).then((r) => r.json()).then((j) => { HAIRP = j; renderStyles(); rerender(); }).catch(() => {});
+function photoEntry(id) { return !S.procHair && HAIRP && HAIRP[id] ? HAIRP[id] : null; }
+function photoBang(e, bang) { return bang && e.bangs[bang] ? bang : e.def; }
+function photoStyle(id, bang) {
+  const e = photoEntry(id); if (!e) return null;
+  const b = photoBang(e, bang), file = e.bangs[b], key = id + '|' + b;
+  const pc = photoCache[key];
+  if (pc && pc.ready) return pc.st;
+  if (pc) return pc.failed ? null : 'loading';
+  const ent = (photoCache[key] = { ready: false });
+  const img = new Image();
+  img.onload = () => {
+    const st0 = STYLES.find((q) => q.id === id), TW = 1080, TH = 1332;
+    const c = mk(TW, TH), x = c.getContext('2d', { willReadFrequently: true }); x.imageSmoothingQuality = 'high'; x.drawImage(img, 0, 0, TW, TH);
+    const src = x.getImageData(0, 0, TW, TH).data, bk = new ImageData(TW, TH), fr = new ImageData(TW, TH); let fsum = 0;
+    for (let i = 0; i < src.length; i += 4) {
+      const a = src[i + 3]; if (!a) continue; const f = src[i + 1] / 255;
+      bk.data[i] = fr.data[i] = src[i]; bk.data[i + 1] = fr.data[i + 1] = 128;
+      bk.data[i + 3] = a * (1 - f); fr.data[i + 3] = a * f; fsum += a * f;
+    }
+    const back = mk(TW, TH); back.getContext('2d').putImageData(bk, 0, 0);
+    let front = null; if (fsum > 255 * 400) { front = mk(TW, TH); front.getContext('2d').putImageData(fr, 0, 0); }
+    ent.st = { back, front, id: 'p:' + id, bang: b, g: st0.g, ears: !!st0.ears, photo: true, hl: (e.hl || {})[b] }; ent.ready = true;
+    if (S.style === id) rerender();
+  };
+  img.onerror = () => { ent.failed = true; };
+  img.src = new URL('./assets/hair/' + file, import.meta.url).href;
+  return 'loading';
+}
 function currentStyle() {
   if (S.style === 'none') return null;
+  const ph = photoStyle(S.style, S.bang);
+  if (ph === 'loading') return null;
+  if (ph) return ph;
   const key = S.style + '|' + (S.bang || '');
   if (!styleCache[key]) { const t0 = performance.now(); styleCache[key] = buildStyle(S.style, S.bang); stats.styleBuildMs = performance.now() - t0; }
   return styleCache[key];
@@ -356,7 +411,7 @@ function coloredStyle(st) {
   const hex = styleHex(), lk = styleLook(), key = st.id + '|' + st.bang + '|' + hex + '|' + lk.light + '|' + lk.expo + '|' + lk.skin;
   if (!colorCache[key]) {
     if (Object.keys(colorCache).length > 8) for (const k in colorCache) delete colorCache[k];
-    colorCache[key] = { back: colorize(st.back, hex, hairLUT, lk), front: st.front ? colorize(st.front, hex, hairLUT, lk) : null };
+    const o = { ...lk, photo: !!st.photo }; colorCache[key] = { back: colorize(st.back, hex, hairLUT, o), front: st.front ? colorize(st.front, hex, hairLUT, o) : null };
   }
   return colorCache[key];
 }
@@ -364,14 +419,10 @@ function coloredStyle(st) {
 /* ------------------------------------------------------------------ compositing */
 function ensure(c, W, H) { if (c.width !== W || c.height !== H) { c.width = W; c.height = H; } }
 function compose(W, H, P, mask) {
-  ensure(outC, W, H); ensure(glassC, W, H);
+  ensure(outC, W, H); ensure(glassC, W, H); ensure(lensC, W, H);
   const t0 = performance.now();
-  const ai = aiCurrent();
-  if (ai) P = ai.lm || P;
-  const st = !ai && P && P.aff ? currentStyle() : null;
-  if (ai) {
-    outX.drawImage(ai.c, 0, 0);
-  } else if (st) {
+  const st = P && P.aff ? currentStyle() : null;
+  if (st) {
     ensure(baseC, W, H); ensure(occFC, W, H);
     baseX.drawImage(rawC, 0, 0);
     if (mask && mask.fill) {
@@ -385,9 +436,14 @@ function compose(W, H, P, mask) {
         baseX.save(); baseX.globalCompositeOperation = 'soft-light'; baseX.drawImage(grainL, 0, 0); baseX.restore();
       }
     }
-    const col = coloredStyle(st), T = templateTransform(P.aff);
+    let HA = P.aff;
+    if (st.photo && st.hl && st.hl < -0.9 && st.id !== 'p:ponytail' && mask && mask.hairline && mask.hairline > st.hl) { // customer's hairline is lower: stretch the hair down (about the crown)
+      const k = clamp((mask.hairline + 2.0) / (st.hl + 2.0), 1, 1.12), A = P.aff;
+      HA = { a: A.a, b: A.b, c: A.c * k, d: A.d * k, e: A.e + A.c * -2.0 * (1 - k), f: A.f + A.d * -2.0 * (1 - k) };
+    }
+    const col = coloredStyle(st), T = templateTransform(HA);
     outX.drawImage(baseC, 0, 0);
-    outX.save(); outX.setTransform(...T); outX.imageSmoothingQuality = 'high'; outX.drawImage(col.back, 0, 0); outX.restore();
+    if (!S.dbgNoBack) { outX.save(); outX.setTransform(...T); outX.imageSmoothingQuality = 'high'; outX.drawImage(col.back, 0, 0); outX.restore(); }
     // occluder = face oval (+ neck) from the hair-free base image
     const ow = Math.round(W / 4), oh = Math.round(H / 4);
     ensure(occ2, ow, oh); occ2X.globalCompositeOperation = 'source-over'; occ2X.clearRect(0, 0, ow, oh);
@@ -405,13 +461,13 @@ function compose(W, H, P, mask) {
     const fh = Math.hypot(P.chin.x - P.top.x, P.chin.y - P.top.y), ux = (P.chin.x - P.top.x) / fh, uy = (P.chin.y - P.top.y) / fh;
     const g = occ2X.createLinearGradient(P.top.x * kx, P.top.y * ky, (P.top.x + ux * fh * 0.09) * kx, (P.top.y + uy * fh * 0.09) * ky);
     g.addColorStop(0, 'rgba(0,0,0,0.8)'); g.addColorStop(0.45, 'rgba(0,0,0,0.3)'); g.addColorStop(1, 'rgba(0,0,0,0)');
-    occ2X.globalCompositeOperation = 'destination-out'; occ2X.fillStyle = g; occ2X.fillRect(0, 0, ow, oh); occ2X.globalCompositeOperation = 'source-over';
+    if (!st.photo) { occ2X.globalCompositeOperation = 'destination-out'; occ2X.fillStyle = g; occ2X.fillRect(0, 0, ow, oh); occ2X.globalCompositeOperation = 'source-over'; }
     occFX.globalCompositeOperation = 'source-over'; occFX.clearRect(0, 0, W, H); occFX.drawImage(baseC, 0, 0);
     occFX.globalCompositeOperation = 'destination-in'; occFX.imageSmoothingEnabled = true; occFX.drawImage(occ2, 0, 0, W, H);
     occFX.globalCompositeOperation = 'source-over';
     outX.drawImage(occFC, 0, 0);
-    // contact shadow on the face where hair meets it (temples/sides/forehead), not on the chin
-    {
+    // contact shadow on the face where hair meets it (temples/sides/forehead), not on the chin (procedural styles only; photo hair carries its own shading)
+    if (!st.photo) {
       const sw2 = Math.round(W / 8), sh2 = Math.round(H / 8), kx2 = sw2 / W, ky2 = sh2 / H; ensure(cshC, sw2, sh2);
       cshX.globalCompositeOperation = 'source-over'; cshX.clearRect(0, 0, sw2, sh2);
       const ovalPath = () => { cshX.beginPath(); P.oval.forEach((p, i) => { i ? cshX.lineTo(p.x * kx2, p.y * ky2) : cshX.moveTo(p.x * kx2, p.y * ky2); }); cshX.closePath(); };
@@ -420,16 +476,16 @@ function compose(W, H, P, mask) {
       const gg = cshX.createLinearGradient(P.top.x * kx2, P.top.y * ky2, P.chin.x * kx2, P.chin.y * ky2);
       gg.addColorStop(0, 'rgba(0,0,0,1)'); gg.addColorStop(0.4, 'rgba(0,0,0,0.55)'); gg.addColorStop(0.72, 'rgba(0,0,0,0)');
       cshX.fillStyle = gg; cshX.fillRect(0, 0, sw2, sh2);
-      outX.save(); outX.globalAlpha = 0.18; outX.imageSmoothingEnabled = true; outX.drawImage(cshC, 0, 0, W, H); outX.restore();
+      outX.save(); outX.globalAlpha = st.photo ? 0.12 : 0.18; outX.imageSmoothingEnabled = true; outX.drawImage(cshC, 0, 0, W, H); outX.restore();
     }
-    if (col.front) {
+    if (col.front && !S.dbgNoFront) {
       // soft drop shadow of bangs / side locks onto the face
       const sw3 = Math.round(W / 6), sh3 = Math.round(H / 6); ensure(cshC2, sw3, sh3);
       cshX2.globalCompositeOperation = 'source-over'; cshX2.clearRect(0, 0, sw3, sh3);
       cshX2.setTransform(...T.map((v, i) => v * (i % 2 === 0 ? sw3 / W : sh3 / H)));
       cshX2.drawImage(col.front, 0, 0); cshX2.setTransform(1, 0, 0, 1, 0, 0);
       cshX2.globalCompositeOperation = 'source-in'; cshX2.fillStyle = 'rgb(30,15,10)'; cshX2.fillRect(0, 0, sw3, sh3);
-      outX.save(); outX.globalAlpha = 0.3; outX.drawImage(cshC2, 0, fh * 0.025, W, H); outX.restore();
+      outX.save(); outX.globalAlpha = st.photo ? 0.16 : 0.3; outX.drawImage(cshC2, 0, fh * (st.photo ? 0.012 : 0.025), W, H); outX.restore();
       outX.save(); outX.setTransform(...T); outX.drawImage(col.front, 0, 0); outX.restore();
     }
   } else {
@@ -439,13 +495,20 @@ function compose(W, H, P, mask) {
   const t1 = performance.now(); stats.hairMs = stats.hairMs * 0.9 + (t1 - t0) * 0.1;
   if (P && S.shape !== 'none') {
     const sdef = S.style !== 'none' ? STYLES.find((q) => q.id === S.style) : null;
-    drawGlasses(glassX, P, S.frame, S.shape, S.gScale, TYPES[S.type].warm, !!(sdef && sdef.g === 'f' && !sdef.ears));
+    const hideT = !!(sdef && sdef.g === 'f' && !sdef.ears);
+    const photo = !S.procGlasses && drawGlasses3D(glassX, lensX, P, S.frame, S.shape, S.gScale, TYPES[S.type].warm, hideT);
+    if (!photo) drawGlasses(glassX, P, S.frame, S.shape, S.gScale, TYPES[S.type].warm, hideT);
     const d = Math.hypot(P.iR.x - P.iL.x, P.iR.y - P.iL.y);
     const sw = Math.max(8, Math.round(W / 6)), sh = Math.max(8, Math.round(H / 6));
     ensure(shadowC, sw, sh);
     shadowX.globalCompositeOperation = 'source-over'; shadowX.clearRect(0, 0, sw, sh); shadowX.drawImage(glassC, 0, 0, sw, sh);
     shadowX.globalCompositeOperation = 'source-in'; shadowX.fillStyle = 'rgb(25,12,12)'; shadowX.fillRect(0, 0, sw, sh);
     outX.save(); outX.globalAlpha = 0.32; outX.imageSmoothingEnabled = true; outX.drawImage(shadowC, 0, d * 0.035, W, H); outX.restore();
+    if (photo) {
+      // lens: slight darkening of what is behind, then reflections (screen)
+      outX.save(); outX.globalCompositeOperation = 'source-over'; outX.globalAlpha = 0.07;
+      outX.drawImage(lensDark(), 0, 0); outX.globalAlpha = 0.55; outX.globalCompositeOperation = 'screen'; outX.drawImage(lensC, 0, 0); outX.restore();
+    }
     outX.drawImage(glassC, 0, 0);
   }
   stats.glassMs = stats.glassMs * 0.9 + (performance.now() - t1) * 0.1;
@@ -514,7 +577,6 @@ async function goLive() {
     stage.classList.remove('is-still', 'no-live'); $('placeholder').classList.add('hide');
     $('btnLive').classList.add('on'); $('btnPhoto').classList.remove('on');
     if (!liveRAF) liveLoop();
-    updateAIUI();
   } catch (e) { console.warn(e); cameraOK = false; toast('카메라를 쓸 수 없어요: ' + (e.message || e.name || e)); showPhotoMode(); }
 }
 function stopLoop() { if (liveRAF) cancelAnimationFrame(liveRAF); liveRAF = 0; }
@@ -542,7 +604,7 @@ function rebuildStillSeg() { // style toggled on a still: recompute inpaint/neck
 }
 function renderStill() { if (S.mode !== 'still') return; compose(rawC.width, rawC.height, lm, hairMask); present(); }
 async function loadStillFrom(src, sw, sh, mirrorIt) {
-  stopLoop(); S.mode = 'still'; mirror = mirrorIt; origHex = null; grainC = null; look = null; photoId++; aiCache.clear();
+  stopLoop(); S.mode = 'still'; mirror = mirrorIt; origHex = null; grainC = null; look = null;
   const s = Math.min(1, 1600 / Math.max(sw, sh));
   rawC.width = Math.round(sw * s); rawC.height = Math.round(sh * s);
   rawX.drawImage(src, 0, 0, rawC.width, rawC.height);
@@ -552,7 +614,7 @@ async function loadStillFrom(src, sw, sh, mirrorIt) {
   try { await analyzeStill(); } catch (e) { console.error(e); toast('분석 중 오류가 났어요'); }
   setStatus(lm ? '✓ 얼굴 인식 완료' : '얼굴을 찾지 못했어요 (헤어 컬러만 적용)');
   if (!lm) toast('얼굴을 찾지 못했어요. 정면 사진이 가장 잘 돼요.');
-  renderStill(); updateAIUI();
+  renderStill();
 }
 async function capture() { if (S.mode !== 'live' || !video.videoWidth) return; await loadStillFrom(video, video.videoWidth, video.videoHeight, mirror); toast('촬영했어요! 저장하거나 컬러·스타일을 계속 바꿔보세요.'); }
 async function loadFile(file) {
@@ -566,133 +628,8 @@ async function loadSample() {
 }
 function showPhotoMode() {
   stopLoop(); S.mode = 'still'; $('btnPhoto').classList.add('on'); $('btnLive').classList.remove('on');
-  updateAIUI();
   if (rawC.width < 2 || (!lm && !hairMask)) { $('placeholder').classList.remove('hide'); $('phText').textContent = '사진을 올리거나 샘플 사진으로 시작해 보세요'; stage.classList.add('no-live'); }
 }
-
-/* ------------------------------------------------------------------ AI 실제 합성 (cloud, opt-in) */
-let photoId = 0, aiAbort = null, aiSettings = loadSettings();
-const aiCache = new Map();
-S.aiView = true;
-function aiKey() {
-  const m = modelOf(aiSettings);
-  return [photoId, S.style, S.style !== 'none' ? (S.bang || '') : '', S.hair ? S.hair.n : '', S.hair ? (S.intensity < 0.5 ? 's' : 'f') : '', aiSettings.provider + ':' + m.id, aiSettings.keepFace ? 1 : 0].join('|');
-}
-function aiCurrent() { return S.mode === 'still' && S.aiView ? aiCache.get(aiKey()) || null : null; }
-function aiOpts() { const sd = STYLES.find((q) => q.id === S.style); return { style: S.style, bang: S.bang || (sd && sd.bang), gender: sd ? sd.g : S.gender, hair: S.hair, intensity: S.intensity }; }
-function updateAIUI() {
-  const btn = $('btnAI'), note = $('aiNote'), still = S.mode === 'still' && rawC.width > 2 && $('placeholder').classList.contains('hide');
-  const has = S.mode === 'still' && aiCache.has(aiKey()), anyForPhoto = [...aiCache.keys()].some((k) => k.startsWith(photoId + '|'));
-  const m = modelOf(aiSettings);
-  btn.disabled = !still || !navigator.onLine || !!aiAbort;
-  btn.textContent = has ? '✨ 다시 합성' : '✨ AI 실제 합성';
-  $('aiView').hidden = !has;
-  $('aiViewAI').classList.toggle('on', S.aiView); $('aiViewPrev').classList.toggle('on', !S.aiView);
-  note.classList.toggle('warn', !navigator.onLine);
-  if (!navigator.onLine) note.textContent = '📴 오프라인이에요. AI 실제 합성은 인터넷 연결이 필요해요 (다른 기능은 그대로 사용 가능).';
-  else if (S.mode !== 'still') note.textContent = '📷 촬영하거나 사진을 올리면 선택한 헤어스타일·컬러를 실제 사진처럼 AI로 합성할 수 있어요.';
-  else if (!aiSettings.key) note.textContent = '⚙️ AI 설정에서 API 키를 넣으면 사진처럼 자연스러운 AI 합성을 쓸 수 있어요.';
-  else if (has) note.textContent = `✨ AI 합성 결과예요 (${m.n.split(' ·')[0]}). 안경은 그 위에 다시 씌워져요. ‘미리보기’로 기존 합성과 비교할 수 있어요.`;
-  else note.textContent = `선택한 스타일·컬러로 AI 합성 · 1장 약 $${m.usd.toFixed(3)} (${PROVIDERS[aiSettings.provider].n})${anyForPhoto ? ' · 이전 결과는 스타일을 되돌리면 다시 보여요' : ''}`;
-}
-function sheet(id, show) { $(id).hidden = !show; }
-function openSettings() {
-  const st = aiSettings, P = PROVIDERS[st.provider] || PROVIDERS.gemini;
-  $('aiProvider').innerHTML = Object.entries(PROVIDERS).map(([k, v]) => `<option value="${k}" ${k === st.provider ? 'selected' : ''}>${v.n}</option>`).join('');
-  const fillModels = (pk) => { const PP = PROVIDERS[pk]; $('aiModel').innerHTML = PP.models.map((m) => `<option value="${m.id}">${m.n} · 약 $${m.usd}/장</option>`).join('');
-    $('aiKeyLabel').textContent = PP.keyName; $('aiKey').placeholder = PP.keyHint;
-    $('aiKeyHelp').innerHTML = `키 발급: <a href="${PP.signup}" target="_blank" rel="noopener">${PP.signup.replace('https://', '')}</a> ${pk === 'gemini' ? '(Google AI Studio → API 키 만들기. 이미지 모델은 결제(유료 등급) 설정이 필요해요)' : '(fal 대시보드 → Keys → Add key, 크레딧 충전 필요)'}`; };
-  fillModels(st.provider); $('aiModel').value = modelOf(st).id;
-  $('aiProvider').onchange = () => { fillModels($('aiProvider').value); $('aiKey').value = $('aiProvider').value === st.provider ? st.key : (st.keys && st.keys[$('aiProvider').value]) || ''; };
-  $('aiKey').value = st.key || ''; $('aiKey').type = 'password'; $('aiKeepFace').checked = st.keepFace !== false;
-  sheet('aiSettings', true);
-}
-function closeSettings(saveIt) {
-  if (saveIt) {
-    const pv = $('aiProvider').value, key = $('aiKey').value.trim();
-    const keys = { ...(aiSettings.keys || {}) }; keys[pv] = key;
-    aiSettings = { ...aiSettings, provider: pv, model: $('aiModel').value, key, keys, keepFace: $('aiKeepFace').checked };
-    saveSettings(aiSettings); toast(key ? 'AI 설정을 저장했어요 (이 기기에만 저장)' : 'API 키가 비어 있어요');
-  }
-  sheet('aiSettings', false); rerender();
-}
-function askConsent() {
-  return new Promise((res) => {
-    const m = modelOf(aiSettings); $('consentProv').textContent = PROVIDERS[aiSettings.provider].n; $('consentCost').textContent = '$' + m.usd.toFixed(3);
-    sheet('aiConsent', true);
-    $('consentYes').onclick = () => { sheet('aiConsent', false); aiSettings.consent = true; saveSettings(aiSettings); res(true); };
-    $('consentNo').onclick = () => { sheet('aiConsent', false); res(false); };
-  });
-}
-// paste the ORIGINAL inner face (eyes/brows/nose/mouth) back onto the AI result, aligned with a fitted affine,
-// so the customer's face stays pixel-identical. Skipped if the AI changed pose/expression too much.
-function keepOriginalFace(aiC, P0, P1, bangsCover) {
-  const ks = Object.keys(KEYS), fw = Math.hypot(P1.eR.x - P1.eL.x, P1.eR.y - P1.eL.y);
-  const T = fitAffine(ks.map((k) => [P0[k].x, P0[k].y, P1[k].x, P1[k].y, 1]));
-  const res = ks.reduce((a, k) => a + Math.hypot(T.a * P0[k].x + T.c * P0[k].y + T.e - P1[k].x, T.b * P0[k].x + T.d * P0[k].y + T.f - P1[k].y), 0) / ks.length / fw;
-  if (!(res < 0.04)) return { ok: false, res };
-  const W = aiC.width, H = aiC.height, k = 1 / 8, mw = Math.max(8, Math.round(W * k)), mh = Math.max(8, Math.round(H * k));
-  const mc = mk(mw, mh), mx = mc.getContext('2d'), A = P1.aff, top = bangsCover ? -0.1 : -0.36;
-  const R = [[0.6, top], [0.82, top + 0.12], [0.88, 0.25], [0.82, 0.62], [0.66, 0.92], [0.4, 1.17], [0, 1.28]];
-  const poly = R.concat(R.slice(0, -1).reverse().map(([x, y]) => [-x, y]));
-  mx.fillStyle = '#fff'; mx.beginPath();
-  poly.forEach(([x, y], i) => { const u = (A.a * x + A.c * y + A.e) * k, v = (A.b * x + A.d * y + A.f) * k; i ? mx.lineTo(u, v) : mx.moveTo(u, v); });
-  mx.closePath(); mx.fill();
-  const mc2 = mk(mw, mh), mx2 = mc2.getContext('2d'); mx2.filter = 'blur(1.5px)'; mx2.drawImage(mc, 0, 0); // feather (no-op where unsupported)
-  const fc = mk(W, H), fx = fc.getContext('2d');
-  fx.setTransform(T.a, T.b, T.c, T.d, T.e, T.f); fx.drawImage(rawC, 0, 0); fx.setTransform(1, 0, 0, 1, 0, 0);
-  fx.globalCompositeOperation = 'destination-in'; fx.imageSmoothingEnabled = true; fx.drawImage(mc2, 0, 0, W, H);
-  aiC.getContext('2d').drawImage(fc, 0, 0);
-  return { ok: true, res };
-}
-async function runAI() {
-  if (S.mode !== 'still' || rawC.width < 2) return toast('사진 모드에서 사용할 수 있어요');
-  if (!navigator.onLine) { updateAIUI(); return toast('오프라인에서는 AI 합성을 쓸 수 없어요'); }
-  if (!aiSettings.key) { toast('먼저 AI 설정에서 API 키를 넣어 주세요'); return openSettings(); }
-  if (S.style === 'none' && !S.hair) return toast('헤어스타일이나 헤어 컬러를 먼저 골라 주세요');
-  if (!aiSettings.consent && !(await askConsent())) return;
-  const key = aiKey(), myPhoto = photoId, t0 = performance.now(), m = modelOf(aiSettings);
-  const expect = /pro/.test(m.id) ? 30 : /lite/.test(m.id) ? 8 : 15;
-  aiAbort = new AbortController(); updateAIUI(); sheet('aiBusy', true);
-  const tick = setInterval(() => { const s = (performance.now() - t0) / 1000; $('aiBusyText').textContent = `AI 합성 중… ${Math.round(s)}초 (보통 ${expect}초 안팎)`; $('aiBar').style.width = (95 * (1 - Math.exp(-s / expect * 1.4))).toFixed(1) + '%'; }, 250);
-  try {
-    const opts = aiOpts();
-    const out = await aiGenerate(aiSettings, rawC, opts, aiAbort.signal);
-    if (myPhoto !== photoId) return;
-    $('aiBar').style.width = '100%'; $('aiBusyText').textContent = '얼굴 맞추는 중…';
-    const W = rawC.width, H = rawC.height, c = mk(W, H), x = c.getContext('2d'), b = out.bitmap;
-    const sc = Math.max(W / b.width, H / b.height), dw = b.width * sc, dh = b.height * sc; // cover-fit (ratios are matched, so ~no crop)
-    x.drawImage(b, (W - dw) / 2, (H - dh) / 2, dw, dh); const bw = b.width, bh = b.height; b.close && b.close();
-    await ensureMode('IMAGE');
-    let aiLm = extractLm(face.detect(c), W, H), kept = null;
-    if (aiSettings.keepFace !== false && lm && aiLm) {
-      kept = keepOriginalFace(c, lm, aiLm, ['full', 'seethrough', 'side'].includes(opts.bang) && opts.gender !== 'm' || ['dandy', 'twoblock', 'leaf', 'comma'].includes(opts.style));
-    }
-    aiCache.set(key, { c, lm: aiLm || lm, prompt: out.prompt, model: out.model, ms: performance.now() - t0, kept });
-    window.__pc.lastAI = { key, ms: Math.round(performance.now() - t0), model: out.model, prompt: out.prompt, faceFound: !!aiLm, kept, w: bw, h: bh };
-    S.aiView = true;
-    toast(aiLm ? `✨ AI 합성 완료 (${((performance.now() - t0) / 1000).toFixed(1)}초)` : 'AI 합성 완료 (얼굴을 다시 찾지 못해 안경은 원래 위치에 표시돼요)', 3200);
-  } catch (e) {
-    console.warn('AI', e); toast(aiErrorMessage(e), 5200);
-    window.__pc.lastAIError = { kind: e.kind || e.name, msg: String(e.message || e) };
-    if (e.kind === 'auth') openSettings();
-  } finally {
-    clearInterval(tick); sheet('aiBusy', false); aiAbort = null; rerender();
-  }
-}
-function bindAI() {
-  $('btnAI').onclick = runAI; $('btnAISettings').onclick = openSettings;
-  $('aiCancel').onclick = () => aiAbort && aiAbort.abort();
-  $('aiSetClose').onclick = () => closeSettings(true);
-  $('aiKeyClear').onclick = () => { $('aiKey').value = ''; closeSettings(true); };
-  $('aiKeyShow').onclick = () => { const i = $('aiKey'); i.type = i.type === 'password' ? 'text' : 'password'; $('aiKeyShow').textContent = i.type === 'password' ? '보기' : '숨기기'; };
-  $('aiSettings').addEventListener('click', (e) => { if (e.target.id === 'aiSettings') closeSettings(false); });
-  $('aiViewAI').onclick = () => { S.aiView = true; rerender(); };
-  $('aiViewPrev').onclick = () => { S.aiView = false; rerender(); };
-  addEventListener('online', updateAIUI); addEventListener('offline', updateAIUI);
-  updateAIUI();
-}
-window.__pc.ai = { buildPrompt: () => buildPrompt(aiOpts()), settings: () => ({ ...aiSettings, key: aiSettings.key ? '***' : '' }), run: runAI };
 
 /* ------------------------------------------------------------------ save / share */
 function buildExport() {
@@ -702,7 +639,7 @@ function buildExport() {
   x.drawImage(c, 0, 0); x.fillStyle = '#fdf6f9'; x.fillRect(0, H, W, bar); x.fillStyle = '#3d3346'; x.font = `700 ${fs}px sans-serif`;
   const T = TYPES[S.type], sub = T.subs.find((s) => s[0] === S.sub)?.[1] || '';
   const stl = STYLES.find((s) => s.id === S.style);
-  const parts = [`${T.e} ${T.n} ${sub}`, aiCurrent() ? '✨AI 합성' : null, S.style !== 'none' ? stl.n : null, S.hair ? `헤어 ${S.hair.n}` : null,
+  const parts = [`${T.e} ${T.n} ${sub}`, S.style !== 'none' ? stl.n : null, S.hair ? `헤어 ${S.hair.n}` : null,
     S.shape !== 'none' ? `안경 ${FRAMES[S.frame].n} ${SHAPES.find((s) => s.id === S.shape).n}` : null].filter(Boolean);
   x.fillText(parts.join(' · '), fs, H + bar / 2 + fs * 0.35, W - fs * 7);
   x.font = `500 ${Math.round(fs * 0.7)}px sans-serif`; x.fillStyle = '#8a7f93';
@@ -721,7 +658,8 @@ async function share() {
 }
 
 /* ------------------------------------------------------------------ UI */
-function rerender() { if (S.mode === 'still') renderStill(); updateAIUI(); }
+function rerender() { if (S.mode === 'still') renderStill(); }
+initGlasses3D(() => rerender());
 function renderTypes() {
   $('types').innerHTML = Object.entries(TYPES).map(([k, t]) => `<button class="type ${S.type === k ? 'on' : ''}" data-type="${k}" style="background:${t.bg}">${t.e}<span>${t.n}</span></button>`).join('');
   $('subs').innerHTML = TYPES[S.type].subs.map(([k, n]) => `<button class="sub ${S.sub === k ? 'on' : ''}" data-sub="${k}">${TYPES[S.type].n.split(' ')[0]} ${n}</button>`).join('');
@@ -755,14 +693,16 @@ function renderShapes() { $('shapeList').innerHTML = SHAPES.map((s) => `<button 
 function renderStyles() {
   $('genders').innerHTML = [['f', '여성'], ['m', '남성']].map(([k, n]) => `<button class="sub ${S.gender === k ? 'on' : ''}" data-gender="${k}">${n}</button>`).join('');
   const list = STYLES.filter((s) => s.id === 'none' || s.g.includes(S.gender));
-  $('styleList').innerHTML = list.map((s) => `<button class="style ${S.style === s.id ? 'on' : ''}" data-style="${s.id}">${styleIconSVG(s)}<span>${s.n}</span></button>`).join('');
+  $('styleList').innerHTML = list.map((s) => `<button class="style ${S.style === s.id ? 'on' : ''}" data-style="${s.id}">${photoEntry(s.id) ? `<img src="assets/hair/thumbs/${s.id}.jpg" alt="" loading="lazy">` : styleIconSVG(s)}<span>${s.n}</span></button>`).join('');
   const st = STYLES.find((s) => s.id === S.style);
   const bangRow = $('bangRow');
   if (!st || !st.mass) { bangRow.hidden = true; return; }
   bangRow.hidden = false;
-  const opts = st.g === 'f' ? ['none', 'full', 'seethrough', 'side'] : ['none', st.bang];
-  const cur = S.bang || st.bang;
-  $('bangList').innerHTML = opts.map((b) => `<button class="sub ${cur === b ? 'on' : ''}" data-bang="${b}">${b === st.bang ? '기본 · ' : ''}${BANGS[b].n}</button>`).join('');
+  const pe = photoEntry(st.id);
+  const opts = pe ? ['none', 'full', 'seethrough', 'side', st.bang].filter((b, i, a) => pe.bangs[b] && a.indexOf(b) === i) : st.g === 'f' ? ['none', 'full', 'seethrough', 'side'] : ['none', st.bang];
+  const cur = pe ? photoBang(pe, S.bang) : S.bang || st.bang;
+  if (opts.length < 2) { bangRow.hidden = true; return; }
+  $('bangList').innerHTML = opts.map((b) => `<button class="sub ${cur === b ? 'on' : ''}" data-bang="${b}">${b === (pe ? pe.def : st.bang) ? '기본 · ' : ''}${BANGS[b].n}</button>`).join('');
 }
 function selectType(k) {
   S.type = k; S.sub = TYPES[k].subs[0][0];
@@ -811,7 +751,7 @@ function bindUI() {
 
 /* ------------------------------------------------------------------ boot */
 async function boot() {
-  renderTypes(); renderHair(); renderFrames(); renderShapes(); renderStyles(); bindUI(); bindAI();
+  renderTypes(); renderHair(); renderFrames(); renderShapes(); renderStyles(); bindUI();
   try { await loadModels(); }
   catch (e) { console.error(e); $('phText').textContent = 'AI 모델을 불러오지 못했어요. 인터넷 연결을 확인하고 새로고침 해주세요.'; setStatus('모델 로딩 실패'); return; }
   setStatus(`모델 준비 완료 (${delegate})`);

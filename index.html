@@ -41,32 +41,6 @@
   </div>
 </div>
 
-<div id="aiConsent" class="sheet" hidden>
-  <div class="sheet-box" role="dialog" aria-labelledby="consentTitle">
-    <h2 id="consentTitle">⚠️ 사진이 AI 서버로 전송됩니다</h2>
-    <p>‘AI 실제 합성’을 누르면 <b>지금 화면의 사진</b>이 선택한 AI 제공사(<b id="consentProv">Google Gemini</b>) 서버로 전송되어 처리됩니다. 라이브 모드와 일반 미리보기는 지금처럼 기기 안에서만 처리돼요.</p>
-    <ul>
-      <li>고객에게 사진 전송에 대해 <b>동의를 받은 뒤</b> 사용하세요.</li>
-      <li>요청마다 제공사 요금이 부과될 수 있어요 (약 <b id="consentCost">$0.07</b>/장, 사장님 API 키 계정으로 청구).</li>
-      <li>결과 이미지는 AI가 새로 그린 것이라 실제 시술 결과와 다를 수 있어요.</li>
-    </ul>
-    <div class="sheet-btns"><button id="consentNo" class="ctrl">취소</button><button id="consentYes" class="ctrl primary">동의하고 전송</button></div>
-  </div>
-</div>
-<div id="aiSettings" class="sheet" hidden>
-  <div class="sheet-box" role="dialog" aria-labelledby="setTitle">
-    <h2 id="setTitle">⚙️ AI 실제 합성 설정</h2>
-    <label class="fld">제공사<select id="aiProvider"></select></label>
-    <label class="fld">모델<select id="aiModel"></select></label>
-    <label class="fld"><span id="aiKeyLabel">API 키</span>
-      <span class="keyrow"><input id="aiKey" type="password" autocomplete="off" spellcheck="false" placeholder=""><button id="aiKeyShow" class="ctrl" type="button">보기</button></span></label>
-    <p class="note" id="aiKeyHelp"></p>
-    <label class="chk"><input type="checkbox" id="aiKeepFace"> 얼굴은 원본 그대로 유지 (AI 결과에 원본 눈·코·입 영역을 다시 합침)</label>
-    <p class="note">🔒 키는 이 기기의 브라우저(localStorage)에만 저장되고, 선택한 AI 제공사로만 전송돼요. 공용 기기에서는 사용 후 키를 지워 주세요.</p>
-    <div class="sheet-btns"><button id="aiKeyClear" class="ctrl">키 삭제</button><button id="aiSetClose" class="ctrl primary">저장</button></div>
-  </div>
-</div>
-
 <main class="layout">
   <section class="stage-wrap">
     <div class="stage" id="stage">
@@ -85,12 +59,6 @@
       </div>
       <div class="badge" id="status">준비 중…</div>
       <div class="badge right" id="fps"></div>
-      <div class="ai-busy" id="aiBusy" hidden>
-        <div class="spin"></div>
-        <p id="aiBusyText">AI 합성 중…</p>
-        <div class="ai-bar"><span id="aiBar"></span></div>
-        <button class="ctrl" id="aiCancel">취소</button>
-      </div>
       <div class="stage-ctrls">
         <button class="ctrl" id="btnHold" title="누르고 있으면 원본">👁️ 원본</button>
         <button class="shutter" id="btnCapture" title="촬영"><span></span></button>
@@ -110,16 +78,7 @@
       <button class="pill primary" id="btnSave">⬇️ 이미지 저장</button>
       <button class="pill" id="btnShare" hidden>📤 공유</button>
     </div>
-    <div class="ai-row" id="aiRow">
-      <button class="pill ai" id="btnAI" disabled>✨ AI 실제 합성</button>
-      <div class="seg" id="aiView" hidden role="group" aria-label="AI 결과 보기">
-        <button id="aiViewAI" class="on">AI 합성</button>
-        <button id="aiViewPrev">미리보기</button>
-      </div>
-      <button class="pill ghost" id="btnAISettings" title="AI 설정">⚙️ AI 설정</button>
-    </div>
-    <p class="ai-note" id="aiNote">사진 모드·촬영한 사진에서 선택한 헤어스타일·컬러를 실제 사진처럼 합성해요 (인터넷·API 키 필요).</p>
-    <p class="privacy">🔒 사진·영상은 이 기기 안에서만 처리돼요. ‘✨ AI 실제 합성’을 누를 때만(동의 후) 해당 사진이 선택한 AI 서버로 전송돼요.</p>
+    <p class="privacy">🔒 사진·영상은 이 기기 안에서만 처리되며 서버로 전송되지 않아요.</p>
   </section>
 
   <aside class="panel">

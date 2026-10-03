@@ -118,7 +118,7 @@ function paint(ctx, F, asMetal, box) {
 }
 
 // P: {iL,iR,B,eL,eR} pixel points. Draws into ctx (cleared first).
-export function drawGlasses(ctx, P, frameId, shapeId, gScale, accentWarm, hideTemples = false) {
+export function drawGlasses(ctx, P, frameId, shapeId, gScale, accentWarm, hideTemples = false, templesOnly = false) {
   const W = ctx.canvas.width, H = ctx.canvas.height;
   ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, W, H);
   const sh = SHAPE_BY_ID[shapeId]; if (!P || !sh || !sh.d || !frameId) return;
@@ -157,6 +157,7 @@ export function drawGlasses(ctx, P, frameId, shapeId, gScale, accentWarm, hideTe
       ctx.beginPath(); ctx.moveTo(hinge.x, hinge.y); ctx.lineTo(end.x, end.y); ctx.stroke();
     }
   }
+  if (templesOnly) { ctx.setTransform(1, 0, 0, 1, 0, 0); return; }
   for (const sd of sides) {
     setT(sd);
     const lens = lensPath(sh);

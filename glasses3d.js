@@ -61,6 +61,7 @@ function colorize(key, frameId, accentWarm) {
   const W = il.naturalWidth, H = il.naturalHeight;
   const frame = document.createElement('canvas'); frame.width = W; frame.height = H; const fx = frame.getContext('2d');
   const out = fx.createImageData(W, H), o = out.data;
+  let tintC = null, tintImg = null;
   // metal layer
   const isMetal = F.kind === 'metal';
   const metalOf = (q) => q.kind === 'metal' ? q : { c: q.c, hi: mixh(q.c, '#ffffff', 0.55), lo: mixh(q.c, '#000000', 0.5) };
@@ -74,6 +75,8 @@ function colorize(key, frameId, accentWarm) {
     const AF = (isMetal && (rim === 'brow' || rim === 'combo')) ? FRAMES.black : isMetal ? FRAMES.black : F;
     const base = hex(AF.c), tort = AF.kind === 'tortoise' ? tortoiseField(W, H, AF) : null, c2 = AF.c2 ? hex(AF.c2) : null;
     const specK = AF.matte ? 0.25 : AF.kind === 'clear' ? 1.15 : 1;
+    if (AF.kind === 'clear') { tintC = document.createElement('canvas'); tintC.width = W; tintC.height = H; tintImg = tintC.getContext('2d').createImageData(W, H); }
+    const td = tintImg ? tintImg.data : null;
     // vertical extent of acetate for gradient frames
     const y0 = H * 0.5 - 0.75 * 160, y1 = H * 0.5 + 0.55 * 160;
     for (let y = 0; y < H; y++) {
@@ -84,8 +87,15 @@ function colorize(key, frameId, accentWarm) {
         let r = base[0], g = base[1], b = base[2], al = a;
         if (tort) { r = tort[i * 4]; g = tort[i * 4 + 1]; b = tort[i * 4 + 2]; }
         if (c2) { const t = Math.max(0, (gy - 0.3) / 0.7); r += (c2[0] - r) * t; g += (c2[1] - g) * t; b += (c2[2] - b) * t; al = a * (1 - 0.45 * t); }
-        if (AF.kind === 'clear') al = a * (0.38 + 0.5 * Math.min(1, spec / 160));
-        const k = Math.min(1.25, diff);
+        let k = Math.min(1.25, diff);
+        if (AF.kind === 'clear') {
+          // clear acetate: the body tints the skin behind it (separate multiply layer); this layer only carries the
+          // denser rounded edges (Fresnel) and the specular kicks so the frame stays see-through
+          const edge = Math.min(1, Math.max(0, 1 - d[i * 4] / 255 * 1.15)), sp = Math.min(1, spec / 140);
+          if (td) { const dens = 0.5 + 0.45 * edge; td[i * 4] = 255 - (255 - r) * dens; td[i * 4 + 1] = 255 - (255 - g) * dens; td[i * 4 + 2] = 255 - (255 - b) * dens; td[i * 4 + 3] = a; }
+          al = a * Math.min(1, 0.08 + 0.42 * edge + 0.7 * sp);
+          r = 255 - (255 - r) * 0.6; g = 255 - (255 - g) * 0.6; b = 255 - (255 - b) * 0.6; k = 0.75 + 0.25 * Math.min(1, diff);
+        }
         const R = r * k + spec, G = g * k + spec, B = b * k + spec;
         // over existing metal pixel
         const ea = o[i * 4 + 3] / 255, na = al / 255, ta = na + ea * (1 - na);
@@ -95,7 +105,8 @@ function colorize(key, frameId, accentWarm) {
     }
   }
   fx.putImageData(out, 0, 0);
-  const res = { frame, lens: il, W, H, info };
+  if (tintC) tintC.getContext('2d').putImageData(tintImg, 0, 0);
+  const res = { frame, lens: il, tint: tintC, W, H, info };
   colCache.set(ck, res); if (colCache.size > 10) colCache.delete(colCache.keys().next().value);
   return res;
 }
@@ -103,11 +114,13 @@ function mixh(h1, h2, t) { const a = hex(h1), b = hex(h2); return '#' + a.map((v
 
 // Returns false when the photoreal assets are not available yet (caller falls back to the procedural renderer).
 // Draws temples + frame into ctx (cleared); lens reflections go to lensCtx (cleared) to be composited with 'screen'.
-export function drawGlasses3D(ctx, lensCtx, P, frameId, shapeId, gScale, accentWarm, hideTemples) {
+// tintCtx (optional) receives the multiply tint of clear acetate frames; return value is 'tint' when it was drawn.
+export function drawGlasses3D(ctx, lensCtx, P, frameId, shapeId, gScale, accentWarm, hideTemples, tintCtx) {
   const key = variantKey(shapeId, frameId); if (!key) return false;
   const res = colorize(key, frameId, accentWarm); if (!res) return false;
   drawGlasses(ctx, P, frameId, shapeId, gScale, accentWarm, hideTemples, true); // procedural temples only
   const Wc = lensCtx.canvas.width, Hc = lensCtx.canvas.height; lensCtx.setTransform(1, 0, 0, 1, 0, 0); lensCtx.clearRect(0, 0, Wc, Hc);
+  if (tintCtx) { tintCtx.setTransform(1, 0, 0, 1, 0, 0); tintCtx.clearRect(0, 0, tintCtx.canvas.width, tintCtx.canvas.height); }
   let L = P.iL, R = P.iR; if (L.x > R.x) [L, R] = [R, L];
   const dx = R.x - L.x, dy = R.y - L.y, d = Math.hypot(dx, dy); if (d < 6) return true;
   const e = { x: dx / d, y: dy / d }, n = { x: -e.y, y: e.x };
@@ -115,8 +128,8 @@ export function drawGlasses3D(ctx, lensCtx, P, frameId, shapeId, gScale, accentW
   const C = { x: L.x + e.x * t, y: L.y + e.y * t };
   const g = gScale * 0.94, u = (d / 2) * g, k = 160, cx = res.W / 2, cy = res.H / 2;
   const sides = [{ s: (d - t) * g, sx: cx, sw: res.W - cx }, { s: t * g, sx: 0, sw: cx }];
-  for (const target of [ctx, lensCtx]) {
-    const src = target === ctx ? res.frame : res.lens;
+  const jobs = [[ctx, res.frame], [lensCtx, res.lens]]; if (tintCtx && res.tint) jobs.push([tintCtx, res.tint]);
+  for (const [target, src] of jobs) {
     target.imageSmoothingEnabled = true; target.imageSmoothingQuality = 'high';
     for (const sd of sides) {
       // local x = (px - cx)/k ; screen = C + e*x*s + n*y*u  (right half uses s of right side, left half of left side)
@@ -125,5 +138,5 @@ export function drawGlasses3D(ctx, lensCtx, P, frameId, shapeId, gScale, accentW
     }
     target.setTransform(1, 0, 0, 1, 0, 0);
   }
-  return true;
+  return tintCtx && res.tint ? 'tint' : true;
 }

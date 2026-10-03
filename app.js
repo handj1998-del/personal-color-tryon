@@ -60,6 +60,7 @@ const outC = mk(), outX = outC.getContext('2d');
 const recC = mk(), recX = recC.getContext('2d');
 const glassC = mk(), glassX = glassC.getContext('2d');
 const lensC = mk(), lensX = lensC.getContext('2d');
+const tintC = mk(), tintX = tintC.getContext('2d');
 const darkC = mk(), darkX = darkC.getContext('2d');
 function lensDark() { ensure(darkC, lensC.width, lensC.height); darkX.globalCompositeOperation = 'source-over'; darkX.clearRect(0, 0, darkC.width, darkC.height); darkX.drawImage(lensC, 0, 0); darkX.globalCompositeOperation = 'source-in'; darkX.fillStyle = '#000'; darkX.fillRect(0, 0, darkC.width, darkC.height); return darkC; }
 const shadowC = mk(), shadowX = shadowC.getContext('2d');
@@ -419,7 +420,7 @@ function coloredStyle(st) {
 /* ------------------------------------------------------------------ compositing */
 function ensure(c, W, H) { if (c.width !== W || c.height !== H) { c.width = W; c.height = H; } }
 function compose(W, H, P, mask) {
-  ensure(outC, W, H); ensure(glassC, W, H); ensure(lensC, W, H);
+  ensure(outC, W, H); ensure(glassC, W, H); ensure(lensC, W, H); ensure(tintC, W, H);
   const t0 = performance.now();
   const st = P && P.aff ? currentStyle() : null;
   if (st) {
@@ -496,18 +497,22 @@ function compose(W, H, P, mask) {
   if (P && S.shape !== 'none') {
     const sdef = S.style !== 'none' ? STYLES.find((q) => q.id === S.style) : null;
     const hideT = !!(sdef && sdef.g === 'f' && !sdef.ears);
-    const photo = !S.procGlasses && drawGlasses3D(glassX, lensX, P, S.frame, S.shape, S.gScale, TYPES[S.type].warm, hideT);
+    const photo = !S.procGlasses && drawGlasses3D(glassX, lensX, P, S.frame, S.shape, S.gScale, TYPES[S.type].warm, hideT, tintX);
     if (!photo) drawGlasses(glassX, P, S.frame, S.shape, S.gScale, TYPES[S.type].warm, hideT);
     const d = Math.hypot(P.iR.x - P.iL.x, P.iR.y - P.iL.y);
     const sw = Math.max(8, Math.round(W / 6)), sh = Math.max(8, Math.round(H / 6));
     ensure(shadowC, sw, sh);
     shadowX.globalCompositeOperation = 'source-over'; shadowX.clearRect(0, 0, sw, sh); shadowX.drawImage(glassC, 0, 0, sw, sh);
     shadowX.globalCompositeOperation = 'source-in'; shadowX.fillStyle = 'rgb(25,12,12)'; shadowX.fillRect(0, 0, sw, sh);
-    outX.save(); outX.globalAlpha = 0.32; outX.imageSmoothingEnabled = true; outX.drawImage(shadowC, 0, d * 0.035, W, H); outX.restore();
+    outX.save(); outX.imageSmoothingEnabled = true;
+    // two-tier contact shadow: tight occlusion right under the rims + wide soft shadow falling on cheeks/nose (light from above)
+    outX.globalAlpha = photo ? 0.16 : 0.12; outX.drawImage(shadowC, 0, 0, sw, sh, -d * 0.02, d * 0.085, W + d * 0.04, H + d * 0.02);
+    outX.globalAlpha = 0.3; outX.drawImage(shadowC, 0, d * 0.03, W, H); outX.restore();
     if (photo) {
       // lens: slight darkening of what is behind, then reflections (screen)
       outX.save(); outX.globalCompositeOperation = 'source-over'; outX.globalAlpha = 0.07;
-      outX.drawImage(lensDark(), 0, 0); outX.globalAlpha = 0.55; outX.globalCompositeOperation = 'screen'; outX.drawImage(lensC, 0, 0); outX.restore();
+      outX.drawImage(lensDark(), 0, 0); outX.globalAlpha = 0.45; outX.globalCompositeOperation = 'screen'; outX.drawImage(lensC, 0, 0); outX.restore();
+      if (photo === 'tint') { outX.save(); outX.globalCompositeOperation = 'multiply'; outX.drawImage(tintC, 0, 0); outX.restore(); }
     }
     outX.drawImage(glassC, 0, 0);
   }

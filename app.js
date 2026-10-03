@@ -1,6 +1,7 @@
 // 퍼스널컬러 가상 피팅 — 100% client-side. Photos/video never leave the device.
-import { FRAMES, SHAPES, drawGlasses, shapeIconSVG, mix, rgba } from './frames.js';
+import { FRAMES, SHAPES, SHAPE_BY_ID, drawGlasses, shapeIconSVG, mix, rgba } from './frames.js';
 import { initGlasses3D, drawGlasses3D } from './glasses3d.js';
+import { faceMetrics, classifyFace, colorMetrics, classifyColor, recommend, SHAPES_KO } from './reco.js';
 import { STYLES, BANGS, OVAL_IDX, CANON, buildStyle, colorize, fitAffine, templateTransform, invAffine, styleIconSVG } from './hairstyle.js';
 
 const MP_VER = '1.0.1';
@@ -99,6 +100,7 @@ window.__pc.dbg = () => ({ photoCache, colorCache, cur: currentStyle() });
 if (new URLSearchParams(location.search).has('proc')) { S.procGlasses = true; S.procHair = true; }
 Object.defineProperty(window.__pc, 'outC', { get: () => outC });
 Object.defineProperty(window.__pc, 'viewC', { get: () => view });
+Object.defineProperty(window.__pc, 'rawC', { get: () => rawC });
 
 /* ------------------------------------------------------------------ utils */
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -608,6 +610,7 @@ function glassesPass(outX, W, H, P) {
     const sdef = S.style !== 'none' ? STYLES.find((q) => q.id === S.style) : null;
     const hideT = !!(sdef && sdef.g === 'f' && !sdef.ears);
     const photo = !S.procGlasses && drawGlasses3D(glassX, lensX, P, S.frame, S.shape, S.gScale, TYPES[S.type].warm, hideT, tintX);
+    stats.glass3d = !!photo;
     if (!photo) drawGlasses(glassX, P, S.frame, S.shape, S.gScale, TYPES[S.type].warm, hideT);
     const d = Math.hypot(P.iR.x - P.iL.x, P.iR.y - P.iL.y);
     const sw = Math.max(8, Math.round(W / 6)), sh = Math.max(8, Math.round(H / 6));
@@ -887,6 +890,108 @@ function bindUI() {
 }
 
 /* ------------------------------------------------------------------ boot */
+
+/* ------------------------------------------------------------------ recommendation step (cover -> capture -> analysis -> result -> live) */
+const rc = { el: $('reco'), raf: 0, res: null, an: null, combos: [], cur: 0, sel: null, done: null, gender: 'f', busy: false };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+function rcShow(part) { for (const id of ['rcCap', 'rcBusy', 'rcRes']) $(id).hidden = id !== part; $('rcStep').textContent = part === 'rcRes' ? '추천 결과' : part === 'rcBusy' ? '분석 중' : '추천 진단'; }
+function rcPreviewLoop() {
+  rc.raf = requestAnimationFrame(rcPreviewLoop);
+  if (!video.videoWidth) return; const c = $('rcVideo'), vw = video.videoWidth, vh = video.videoHeight;
+  const cw = c.clientWidth * (devicePixelRatio || 1), ch = c.clientHeight * (devicePixelRatio || 1); if (!cw || !ch) return;
+  if (c.width !== Math.round(cw) || c.height !== Math.round(ch)) { c.width = Math.round(cw); c.height = Math.round(ch); }
+  const x = c.getContext('2d'), s = Math.max(c.width / vw, c.height / vh);
+  x.save(); if (mirror) { x.translate(c.width, 0); x.scale(-1, 1); } x.drawImage(video, (c.width - vw * s) / 2, (c.height - vh * s) / 2, vw * s, vh * s); x.restore();
+}
+function rcStopPreview() { if (rc.raf) cancelAnimationFrame(rc.raf); rc.raf = 0; }
+function recoFlow() { // resolves with 'live' | 'skip'
+  rc.el.hidden = false; document.body.classList.add('reco-on'); rcShow('rcCap'); rc.gender = S.gender || 'f';
+  $('rcShot').disabled = !cameraOK; $('rcHint').textContent = cameraOK ? '정면을 바라봐 주세요' : '카메라를 쓸 수 없어요 · 사진을 올려 주세요';
+  if (cameraOK) rcPreviewLoop();
+  return new Promise((r) => { rc.done = r; });
+}
+function rcClose(how) { rcStopPreview(); rc.el.hidden = true; document.body.classList.remove('reco-on'); const d = rc.done; rc.done = null; d && d(how); }
+async function rcAnalyze(src, sw, sh, mir) {
+  if (rc.busy) return; rc.busy = true; rcStopPreview(); rcShow('rcBusy');
+  try {
+    Object.assign(S, { style: 'none', bang: null, hair: null, shape: 'none' });
+    await loadStillFrom(src, sw, sh, mir);
+    const p = window.__pc.rawLm;
+    if (!lm || !p) { toast('얼굴을 찾지 못했어요. 정면으로 다시 찍어 주세요.'); rcShow('rcCap'); if (cameraOK) rcPreviewLoop(); return; }
+    const img = rawX.getImageData(0, 0, rawC.width, rawC.height);
+    const fm = faceMetrics(p), fc = classifyFace(fm), cm = colorMetrics(img, rawC.width, rawC.height, p, hairMask && hairMask.meanRGB), cc = classifyColor(cm);
+    rc.an = { fm, fc, cm, cc, type: cc.type, sub: cc.sub };
+    window.__pc.reco = rc;
+    await rcBuild(true);
+    rcShow('rcRes');
+  } catch (e) { console.error(e); toast('분석 중 오류가 났어요'); rcShow('rcCap'); if (cameraOK) rcPreviewLoop(); }
+  finally { rc.busy = false; }
+}
+async function rcBuild(full) {
+  const a = rc.an;
+  rc.res = recommend({ shape: a.fc.shape, type: a.type, sub: a.sub, gender: rc.gender, TYPES, FRAMES, SHAPE_BY_ID });
+  rc.combos = [0, 1, 2].map((i) => ({ g: rc.res.glasses[i] || rc.res.glasses[0], h: rc.res.hair[i] || rc.res.hair[0], c: rc.res.colors[i] || rc.res.colors[0] }));
+  rc.sel = { ...rc.combos[0] }; rc.cur = 0;
+  rcRenderText();
+  // thumbnails of the three combos rendered on the customer's photo, then the #1 combo large
+  const th = $('rcThumbs'); th.innerHTML = rc.combos.map((c, i) => `<button class="rc-th ${i === 0 ? 'on' : ''}" data-i="${i}"><canvas></canvas><span>추천 ${i + 1}</span></button>`).join('');
+  for (let i = 0; i < 3; i++) await rcRender(rc.combos[i], th.children[i].querySelector('canvas'), 'thumb');
+  await rcRender(rc.sel, $('rcMain'), 'main');
+}
+async function rcRender(cb, canvas, kind) {
+  const was = S.style, wasBang = S.bang;
+  Object.assign(S, { type: rc.an.type, sub: rc.an.sub, gender: rc.gender, style: cb.h.style, bang: cb.h.bang, hair: cb.c.hair, shape: cb.g.shape, frame: cb.g.frame, noHiGlasses: true, compare: 'after', holdBefore: false });
+  for (let t = 0; t < 120 && !currentStyle(); t++) await sleep(50);
+  if (was !== S.style || wasBang !== S.bang || !hairMask || !hairMask.fill) rebuildStillSeg();
+  for (let t = 0; t < 60; t++) { compose(rawC.width, rawC.height, lm, hairMask); if (stats.glass3d) break; await sleep(50); }
+  compose(rawC.width, rawC.height, lm, hairMask); S.noHiGlasses = false;
+  const fh = Math.hypot(lm.chin.x - lm.top.x, lm.chin.y - lm.top.y); let cx = (lm.top.x + lm.chin.x) / 2, cy = (lm.top.y + lm.chin.y) / 2 - fh * 0.12;
+  const ar = kind === 'main' ? 0.8 : 1; let hh = Math.min(fh * (kind === 'main' ? 2.3 : 1.85), outC.height), ww = hh * ar;
+  if (ww > outC.width) { ww = outC.width; hh = ww / ar; }
+  cx = clamp(cx, ww / 2, outC.width - ww / 2); cy = clamp(cy, hh / 2, outC.height - hh / 2);
+  const dpr = devicePixelRatio || 1, cw = Math.round((canvas.clientWidth || (kind === 'main' ? 480 : 140)) * dpr);
+  canvas.width = cw; canvas.height = Math.round(cw / ar);
+  const x = canvas.getContext('2d'); x.imageSmoothingQuality = 'high'; x.fillStyle = '#eee9e2'; x.fillRect(0, 0, canvas.width, canvas.height);
+  x.save(); if (mirror) { x.translate(canvas.width, 0); x.scale(-1, 1); }
+  // crop rect around the face, clipped to the photo (keeps the mapping exact when the crop runs past an edge)
+  const k = canvas.width / ww, X0 = cx - ww / 2, Y0 = cy - hh / 2;
+  const ax = Math.max(0, X0), ay = Math.max(0, Y0), bx = Math.min(outC.width, X0 + ww), by = Math.min(outC.height, Y0 + hh);
+  if (bx > ax && by > ay) x.drawImage(outC, ax, ay, bx - ax, by - ay, (ax - X0) * k, (ay - Y0) * k, (bx - ax) * k, (by - ay) * k);
+  x.restore();
+}
+const FACE_WHY = { oval: '이마·광대·턱의 폭과 길이 비율이 고르게 균형 잡힌 얼굴형', round: '얼굴 길이가 짧고 턱선이 부드러운 곡선형', square: '턱 끝 폭이 넓고 턱 각이 또렷한 얼굴형', long: '얼굴 폭에 비해 세로 길이가 긴 얼굴형', heart: '이마가 넓고 턱으로 갈수록 좁아지는 얼굴형', diamond: '광대가 가장 넓고 이마·턱이 좁은 얼굴형' };
+function rcRenderText() {
+  const a = rc.an, T = TYPES[a.type], subN = T.subs.find((q) => q[0] === a.sub)?.[1] || '', est = TYPES[a.cc.type];
+  const tone = a.cc.warm >= 0 ? '웜' : '쿨', conf = a.cc.conf > 0.6 ? '뚜렷함' : a.cc.conf > 0.25 ? '보통' : '경계(직접 확인 권장)';
+  $('rcSum').innerHTML = `<div class="rc-chip"><small>얼굴형</small><b>${SHAPES_KO[a.fc.shape]}</b><span>${FACE_WHY[a.fc.shape]}</span></div>
+    <div class="rc-chip"><small>퍼스널컬러 ${a.type === a.cc.type && a.sub === a.cc.sub ? '추정' : '선택'}</small><b>${T.n} ${subN}</b><span>분석 추정: ${est.n} · 언더톤 ${tone} (${conf})</span></div>`;
+  $('rcTypes').innerHTML = Object.entries(TYPES).map(([k, t]) => `<button class="${a.type === k ? 'on' : ''}" data-type="${k}">${t.n}</button>`).join('');
+  $('rcSubs').innerHTML = T.subs.map(([k, n]) => `<button class="${a.sub === k ? 'on' : ''}" data-sub="${k}">${n}</button>`).join('');
+  $('rcGender').innerHTML = [['f', '여성'], ['m', '남성']].map(([k, n]) => `<button class="${rc.gender === k ? 'on' : ''}" data-g="${k}">${n}</button>`).join('');
+  const shN = (id) => SHAPES.find((q) => q.id === id)?.n || id, stN = (id) => STYLES.find((q) => q.id === id)?.n || id;
+  $('rcGlasses').innerHTML = rc.res.glasses.map((g, i) => `<li class="${rc.sel && rc.sel.g === g ? 'on' : ''}" data-k="g" data-i="${i}"><b>${shN(g.shape)} · ${FRAMES[g.frame].n}</b><span>${g.why}</span></li>`).join('');
+  $('rcHair').innerHTML = rc.res.hair.map((h, i) => `<li class="${rc.sel && rc.sel.h === h ? 'on' : ''}" data-k="h" data-i="${i}"><b>${stN(h.style)}${h.bang && BANGS[h.bang] && h.bang !== 'none' ? ' · ' + BANGS[h.bang].n : ''}</b><span>${h.why}</span></li>`).join('');
+  $('rcColors').innerHTML = rc.res.colors.map((c, i) => `<li class="${rc.sel && rc.sel.c === c ? 'on' : ''}" data-k="c" data-i="${i}"><i style="background:${c.hair.c}"></i><b>${c.hair.n}</b><span>${c.why}</span></li>`).join('');
+}
+async function rcSelect(next) { rc.sel = next; rcRenderText(); await rcRender(rc.sel, $('rcMain'), 'main'); }
+function rcBind() {
+  $('rcSkip').onclick = () => rcClose('skip');
+  $('rcShot').onclick = () => { if (cameraOK && video.videoWidth) rcAnalyze(video, video.videoWidth, video.videoHeight, mirror); };
+  $('rcFile').onchange = async (e) => { const f = e.target.files[0]; e.target.value = ''; if (!f) return; try { const bmp = await createImageBitmap(f, { imageOrientation: 'from-image' }); rcAnalyze(bmp, bmp.width, bmp.height, false); } catch (er) { toast('사진을 열 수 없어요'); } };
+  $('rcRetake').onclick = () => { rcShow('rcCap'); if (cameraOK) rcPreviewLoop(); };
+  $('rcThumbs').onclick = (e) => { const b = e.target.closest('[data-i]'); if (!b || rc.busy) return; [...$('rcThumbs').children].forEach((q) => q.classList.toggle('on', q === b)); rcSelect({ ...rc.combos[+b.dataset.i] }); };
+  const lists = (e) => { const li = e.target.closest('li[data-k]'); if (!li || rc.busy) return; const k = li.dataset.k, i = +li.dataset.i; const src = k === 'g' ? rc.res.glasses : k === 'h' ? rc.res.hair : rc.res.colors; rcSelect({ ...rc.sel, [k]: src[i] }); };
+  ['rcGlasses', 'rcHair', 'rcColors'].forEach((id) => { $(id).onclick = lists; });
+  $('rcTypes').onclick = async (e) => { const b = e.target.closest('[data-type]'); if (!b || rc.busy) return; rc.an.type = b.dataset.type; rc.an.sub = rc.an.type === rc.an.cc.type ? rc.an.cc.sub : TYPES[rc.an.type].subs[0][0]; rc.busy = true; try { await rcBuild(); } finally { rc.busy = false; } };
+  $('rcSubs').onclick = async (e) => { const b = e.target.closest('[data-sub]'); if (!b || rc.busy) return; rc.an.sub = b.dataset.sub; rc.busy = true; try { await rcBuild(); } finally { rc.busy = false; } };
+  $('rcGender').onclick = async (e) => { const b = e.target.closest('[data-g]'); if (!b || rc.busy) return; rc.gender = b.dataset.g; rc.busy = true; try { await rcBuild(); } finally { rc.busy = false; } };
+  $('rcGo').onclick = () => { // apply the previewed combo to the main screen, then go live
+    const c = rc.sel; Object.assign(S, { type: rc.an.type, sub: rc.an.sub, gender: rc.gender, style: c.h.style, bang: c.h.bang, hair: c.c.hair, shape: c.g.shape, frame: c.g.frame });
+    renderTypes(); renderHair(); renderFrames(); renderShapes(); renderStyles();
+    rcClose('live');
+  };
+}
+
 /* ------------------------------------------------------------------ cover (intro) */
 // shown on every launch (in-store: one cover per customer); models load in the background, the camera is only requested after the tap
 const S0 = { ...S };
@@ -921,12 +1026,16 @@ async function startSession() { // after the cover tap
     // ask for the camera right away (inside the tap), but start the heavy live loop only once the fade has finished
     const fade = new Promise((r) => setTimeout(r, 720));
     try { if (!cameraOK) await startCamera(); } catch (e) { console.warn(e); }
-    await fade; await goLive();
-  } else showPhotoMode();
+    await fade;
+  }
+  const how = new URLSearchParams(location.search).has('noreco') ? 'skip' : await recoFlow();
+  if (cameraOK) await goLive();
+  else if (how === 'live' && lm) { S.mode = 'still'; stage.classList.add('is-still'); $('placeholder').classList.add('hide'); rebuildStillSeg(); renderStill(); showPhotoMode(); }
+  else showPhotoMode();
 }
 let modelsP = null;
 async function boot() {
-  renderTypes(); renderHair(); renderFrames(); renderShapes(); renderStyles(); bindUI();
+  renderTypes(); renderHair(); renderFrames(); renderShapes(); renderStyles(); bindUI(); rcBind();
   const params = new URLSearchParams(location.search);
   const skipCover = params.has('nocover') || params.has('photo') || params.has('sample');
   modelsP = loadModels().then(() => { modelsReady = true; coverLoad(''); setStatus(`모델 준비 완료 (${delegate})`); },

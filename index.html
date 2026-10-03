@@ -37,6 +37,30 @@
     <p class="cv-load" id="cvLoad">준비 중…</p>
   </div>
 </div>
+<section id="reco" class="reco" hidden>
+  <header class="rc-top"><span class="wordmark">H.O.W</span><span class="rc-step" id="rcStep">추천 진단</span><button id="rcSkip" class="rc-link">건너뛰고 바로 테스트 →</button></header>
+  <div class="rc-cap" id="rcCap">
+    <div class="rc-cam"><canvas id="rcVideo"></canvas><div class="rc-oval" aria-hidden="true"></div><p class="rc-hint" id="rcHint">정면을 바라봐 주세요</p></div>
+    <div class="rc-cap-btns">
+      <label class="rc-link"><input type="file" id="rcFile" accept="image/*" hidden>사진 올리기</label>
+      <button id="rcShot" class="rc-shutter" aria-label="촬영"><span></span></button>
+      <span class="rc-cap-note">얼굴형 · 퍼스널컬러 분석</span>
+    </div>
+  </div>
+  <div class="rc-busy" id="rcBusy" hidden><div class="rc-spin"></div><p>얼굴형과 컬러를 분석하는 중…</p></div>
+  <div class="rc-res" id="rcRes" hidden>
+    <div class="rc-left"><canvas id="rcMain"></canvas><div class="rc-thumbs" id="rcThumbs"></div></div>
+    <div class="rc-right">
+      <div class="rc-sum" id="rcSum"></div>
+      <div class="rc-sec"><h3>퍼스널컬러 <small>컨설턴트가 직접 선택할 수 있어요</small></h3><div class="rc-seg" id="rcTypes"></div><div class="rc-seg sm" id="rcSubs"></div></div>
+      <div class="rc-sec"><h3>안경 추천</h3><ol class="rc-list" id="rcGlasses"></ol></div>
+      <div class="rc-sec"><h3>헤어스타일 추천 <span class="rc-seg sm inline" id="rcGender"></span></h3><ol class="rc-list" id="rcHair"></ol></div>
+      <div class="rc-sec"><h3>헤어 컬러 추천</h3><ol class="rc-list" id="rcColors"></ol></div>
+      <p class="rc-disc">얼굴 비율과 피부·모발·눈동자 색을 기기 안에서 분석한 참고용 추천입니다. 조명·카메라·메이크업에 따라 달라질 수 있으니 최종 진단은 컨설턴트가 확인해 주세요.</p>
+      <div class="rc-actions"><button id="rcRetake" class="rc-btn ghost">다시 촬영</button><button id="rcGo" class="rc-btn">실시간 테스트 시작</button></div>
+    </div>
+  </div>
+</section>
 <header class="top">
   <div class="brand"><span class="wordmark">H.O.W</span><div><h1>퍼스널컬러 가상 피팅</h1><p>안경테 · 헤어 컬러 · 헤어스타일 실시간 테스트</p></div></div>
   <div class="top-right">

@@ -78,7 +78,7 @@ button,label.pill,label.ctrl{font:inherit;cursor:pointer}
 .switch{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
 .switch input{accent-color:var(--accent);width:18px;height:18px}
 .credit{font-size:11px;color:var(--muted);margin:0 4px 20px}
-.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(20px);background:#3d3346;color:#fff;padding:10px 16px;border-radius:999px;font-size:14px;opacity:0;transition:.25s;pointer-events:none;z-index:60;max-width:90vw;text-align:center}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(20px);background:#3d3346;color:#fff;padding:10px 16px;border-radius:999px;font-size:14px;opacity:0;transition:.25s;pointer-events:none;z-index:60;max-width:90vw;text-align:center;word-break:keep-all}
 .toast.show{opacity:1;transform:translateX(-50%)}
 .layout{grid-template-columns:minmax(0,1fr)}
 @media (min-width:900px){.layout{grid-template-columns:minmax(0,1.35fr) minmax(340px,1fr)}}
@@ -222,3 +222,16 @@ body.reco-on{overflow:hidden}
 .rc-btn.ghost{background:transparent;color:#2b2a28;flex:0 0 auto}
 .reco.ultra #rcMain,.reco.ultra #rcThumbs{display:none}
 .rc-note{margin:0 0 10px;padding:10px 14px;border-radius:12px;background:#f1ece4;color:#5e5a54;font-size:13px;line-height:1.5;grid-column:1/-1}
+
+/* version label + update button (cover foot, main footer) and new-version banner: small, muted */
+.ver-line{display:flex;align-items:center;justify-content:center;gap:10px;font-size:11px;color:#b5afa6;letter-spacing:.04em;margin:0}
+.cv-ver{margin-top:14px}
+.upd-btn{border:1px solid currentColor;border-color:#e2ddd5;background:transparent;color:inherit;font:inherit;font-size:11px;letter-spacing:.02em;padding:4px 10px;border-radius:999px;cursor:pointer}
+.upd-btn:hover{color:var(--ink2,#2b2a28);border-color:#cfc8bd}
+.upd-btn.busy{opacity:.5;pointer-events:none}
+.app-foot{padding:6px 12px calc(14px + env(safe-area-inset-bottom))}
+body.cover-on .app-foot,body.reco-on .app-foot{visibility:hidden}
+.upd-banner{position:fixed;left:50%;top:max(10px,env(safe-area-inset-top));transform:translateX(-50%);z-index:70;display:flex;align-items:center;gap:10px;background:#2b2a28;color:#f5f1ea;font-size:12.5px;letter-spacing:.02em;padding:7px 8px 7px 16px;border-radius:999px;box-shadow:0 6px 20px #0003;white-space:nowrap}
+.upd-banner[hidden]{display:none}
+.upd-banner b{font-weight:600}
+.upd-banner button{border:0;background:#f5f1ea;color:#2b2a28;font:inherit;font-weight:600;padding:5px 12px;border-radius:999px;cursor:pointer}

@@ -1437,9 +1437,7 @@ window.__pc.loadSample = loadSample;
 boot().then(() => { window.__pc.ready = true; });
 
 // ---------- PWA: service worker + install button ----------
-if ('serviceWorker' in navigator && location.protocol !== 'file:' && !new URLSearchParams(location.search).has('nosw')) {
-  addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch((e) => console.warn('SW', e)));
-}
+// (service worker registration + update check live in update.js)
 {
   const btn = document.getElementById('btnInstall'), guide = document.getElementById('iosGuide');
   const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;

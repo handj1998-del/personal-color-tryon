@@ -16,3 +16,8 @@ Static, 100% client-side web app (index.html / style.css / app.js / frames.js / 
 
 
 See `assets/CREDITS.md` for asset sources and licenses. Everything runs on-device; there is no server/API feature.
+
+## 버전 · 업데이트
+- 버전은 `version.js` 한 곳에서 관리합니다 (`tools/bump-version.sh v18` 가 `version.js` + `version.json` 을 함께 갱신). `sw.js` 는 `version.js` 를 import 해서 캐시 이름(`pc-tryon-vN`)으로 쓰고, 표지·메인 하단에 `vN · 날짜` 가 표시됩니다.
+- 표지 하단 **🔄 업데이트 확인** / 메인 하단 **🔄 새로고침**: 서비스 워커 업데이트(SKIP_WAITING) → 이전 캐시 삭제 → 캐시 우회 새로고침.
+- 실행 시·앱 복귀 시 `version.json` 을 no-store 로 확인해 새 버전이 있으면 상단에 ‘새 버전이 있어요 · 업데이트’ 배너가 뜹니다.

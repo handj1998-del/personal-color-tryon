@@ -1,6 +1,6 @@
 // Service worker: caches the app shell and the self-hosted MediaPipe runtime/models so the app works offline
 // after the first visit. Bump VERSION on every deploy.
-const VERSION = 'pc-tryon-v14';
+const VERSION = 'pc-tryon-v15';
 const SHELL = ['./', './index.html', './style.css', './app.js', './frames.js', './hairstyle.js', './glasses3d.js', './reco.js', './manifest.webmanifest',
   './assets/glasses/glasses.json', './assets/hair/hair.json',
   './assets/sample.jpg', './icons/icon-192.png', './icons/icon-512.png', './icons/icon-maskable-512.png', './icons/apple-touch-icon.png', './icons/favicon-32.png', './assets/fonts/cormorant-latin.woff2'];

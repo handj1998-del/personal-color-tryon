@@ -102,16 +102,21 @@ let grainC = null;
 // grain texture: high-pass of a cheek patch (gray 128 = no change) used with soft-light over filled areas
 function makeGrain(P) {
   if (!P || !P.aff || rawC.width < 64) return;
-  // skin texture source: the customer's real upper forehead when it is visible (same pores/lighting as the area being
-  // synthesized), else the cheek
-  const A = P.aff, fh = hairMask && hairMask.fhN > 40, gx = fh ? 0 : 0.5, gy = fh ? -0.72 : 0.38, X = A.a * gx + A.c * gy + A.e, Y = A.b * gx + A.d * gy + A.f;
+  // skin texture source: the cheek. Features in the patch (moles, a stray hair, a fold) would repeat as a visible tiled pattern
+  // over the fill -> the high-pass is clamped to ~1.5 sigma so only the fine pore texture survives
+  const A = P.aff, gx = 0.5, gy = 0.38, X = A.a * gx + A.c * gy + A.e, Y = A.b * gx + A.d * gy + A.f;
   const sz = clamp(Math.round(Math.hypot(A.a, A.b) * 0.3), 24, 96), x0 = Math.round(X - sz / 2), y0 = Math.round(Y - sz / 2);
   if (x0 < 0 || y0 < 0 || x0 + sz > rawC.width || y0 + sz > rawC.height) return;
   const src = rawX.getImageData(x0, y0, sz, sz).data, Lm = new Float32Array(sz * sz);
   for (let i = 0; i < sz * sz; i++) Lm[i] = 0.299 * src[i * 4] + 0.587 * src[i * 4 + 1] + 0.114 * src[i * 4 + 2];
   const bl = boxBlur(Lm, sz, sz, 3);
   const c = mk(sz, sz), x = c.getContext('2d'), id = x.createImageData(sz, sz);
-  for (let i = 0; i < sz * sz; i++) { const v = clamp(128 + (Lm[i] - bl[i]) * 2.0, 0, 255); id.data[i * 4] = id.data[i * 4 + 1] = id.data[i * 4 + 2] = v; id.data[i * 4 + 3] = 255; }
+  let sd = 0; for (let i = 0; i < sz * sz; i++) sd += (Lm[i] - bl[i]) ** 2; sd = Math.sqrt(sd / (sz * sz)) + 0.5;
+  // heal outliers (moles, spots) + 2px around them, then soft-clamp the rest
+  const ol = new Uint8Array(sz * sz); for (let y = 0; y < sz; y++) for (let x = 0; x < sz; x++) if (Math.abs(Lm[y * sz + x] - bl[y * sz + x]) > 2.2 * sd)
+    for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) { const yy = y + dy, xx = x + dx; if (yy >= 0 && xx >= 0 && yy < sz && xx < sz) ol[yy * sz + xx] = 1; }
+  sd *= 1.5;
+  for (let i = 0; i < sz * sz; i++) { const dv = ol[i] ? 0 : Lm[i] - bl[i], v = clamp(128 + sd * Math.tanh(dv / sd) * 1.6, 0, 255); id.data[i * 4] = id.data[i * 4 + 1] = id.data[i * 4 + 2] = v; id.data[i * 4 + 3] = 255; }
   x.putImageData(id, 0, 0); grainC = c;
 }
 const segIn = mk(), segX = segIn.getContext('2d', { willReadFrequently: true });
@@ -378,6 +383,12 @@ function buildSeg(masks, w, h, prev, lmP) {
           knownSkin[i] = dc < 0.07 && Ly > skinY * 0.62 && Ly < Math.min(250, skinY * 1.9) ? 1 : 0; }
       }
     }
+    if (aff && out.hairline != null) { // around the customer's own hairline thin remnant strands get only a partial hole value and ghost
+      // through under the new hair edge -> make the hole decisive there
+      const IA2 = invAffine({ a: aff.a / segScaleX, b: aff.b / segScaleY, c: aff.c / segScaleX, d: aff.d / segScaleY, e: aff.e / segScaleX, f: aff.f / segScaleY }), h0 = out.hairline;
+      for (let i = 0; i < w * h; i++) { const hv = hole[i]; if (hv < 0.1 || hv >= 1) continue; const x = i % w, y = (i - x) / w, cy = IA2.b * x + IA2.d * y + IA2.f;
+        if (cy > h0 - 0.1 && cy < h0 + 0.25) hole[i] = Math.min(1, hv * (1 + 1.4 * clamp(1 - Math.abs(cy - (h0 + 0.07)) / 0.18, 0, 1))); }
+    }
     if (aff) { // per-column lower edge of the synthesized (hole) area across the forehead: the new hair must reach it (no fill band)
       const hp = new Float32Array(13).fill(NaN);
       for (let q = 0; q < 13; q++) { const cx = -0.72 + q * 0.12;
@@ -385,6 +396,25 @@ function buildSeg(masks, w, h, prev, lmP) {
           if (X < 0 || Y < 0 || X >= w || Y >= h) break; if (hole[Y * w + X] > 0.5) { hp[q] = cy; break; } } }
       if (prev && prev.holeProf) for (let q = 0; q < 13; q++) if (hp[q] === hp[q] && prev.holeProf[q] === prev.holeProf[q] && Math.abs(hp[q] - prev.holeProf[q]) < 0.2) hp[q] = prev.holeProf[q] * 0.5 + hp[q] * 0.5;
       out.holeProf = hp;
+      // colour of the real skin just BELOW the synthesized area (what the fill must continue seamlessly; the mid-forehead average is lighter)
+      let r = 0, g = 0, b = 0, n = 0;
+      for (let q = 0; q < 13; q++) { if (hp[q] !== hp[q]) continue; const cx = -0.72 + q * 0.12;
+        for (let cy = hp[q] + 0.03; cy < hp[q] + 0.12; cy += 0.01) for (const dx of [-0.04, 0, 0.04]) {
+          const X = Math.round((aff.a * (cx + dx) + aff.c * cy + aff.e) / segScaleX), Y = Math.round((aff.b * (cx + dx) + aff.d * cy + aff.f) / segScaleY);
+          if (X < 0 || Y < 0 || X >= w || Y >= h) continue; const i = Y * w + X; if (hole[i] > 0.02 || !knownSkin[i]) continue; const j = i * 4; r += px[j]; g += px[j + 1]; b += px[j + 2]; n++; } }
+      out.edgeRGB = n > 15 ? [r / n, g / n, b / n] : null;
+      // per-height reference: mean real forehead skin per 0.02 band of cy (rows with none take the nearest band BELOW), so the fill
+      // continues the forehead's own vertical shading and matches the real skin next to it at the same height
+      const IA3 = invAffine({ a: aff.a / segScaleX, b: aff.b / segScaleY, c: aff.c / segScaleX, d: aff.d / segScaleY, e: aff.e / segScaleX, f: aff.f / segScaleY });
+      // three lateral zones (left temple / centre / right temple): the centre is usually the brightest (frontal highlight) and must
+      // not be what the temples are filled with
+      const NB = 50, acc = new Float32Array(3 * NB * 4), zoneOf = (cx) => (cx < -0.28 ? 0 : cx > 0.28 ? 2 : 1);
+      for (let i = 0; i < w * h; i++) { if (!knownSkin[i] || hole[i] > 0.02) continue; const x = i % w, y = (i - x) / w, cx = IA3.a * x + IA3.c * y + IA3.e, cy = IA3.b * x + IA3.d * y + IA3.f;
+        if (Math.abs(cx) > 0.85 || cy < -1.6 || cy >= -0.6) continue; const k = (zoneOf(cx) * NB + Math.floor((cy + 1.6) / 0.02)) * 4, j = i * 4; acc[k] += px[j]; acc[k + 1] += px[j + 1]; acc[k + 2] += px[j + 2]; acc[k + 3]++; }
+      const rows = [0, 1, 2].map((z) => { const r = new Array(NB).fill(null); let last = null;
+        for (let k = NB - 1; k >= 0; k--) { const q = (z * NB + k) * 4; if (acc[q + 3] >= 5) last = [acc[q] / acc[q + 3], acc[q + 1] / acc[q + 3], acc[q + 2] / acc[q + 3]]; r[k] = last; } return r; });
+      for (const z of [0, 2]) for (let k = 0; k < NB; k++) if (!rows[z][k]) rows[z][k] = rows[1][k];
+      out.rowRGB = rows[1].some(Boolean) ? rows : null; out.zoneOf = zoneOf;
     }
     const filled = pushPull(px, w, h, known), skinFill = inOval ? pushPull(px, w, h, knownSkin) : null;
     // background: mirror the texture from just outside each hole run (keeps wall/clothes texture), blended with the smooth fill
@@ -404,7 +434,8 @@ function buildSeg(masks, w, h, prev, lmP) {
         x = e + 1;
       }
     }
-    const fid = new ImageData(w, h);
+    let ovS = null; if (inOval) { const f = new Float32Array(w * h); for (let i = 0; i < w * h; i++) f[i] = inOval[i]; ovS = boxBlur(boxBlur(f, w, h, Math.max(2, Math.round(w / 40))), w, h, Math.max(2, Math.round(w / 40))); }
+    const fid = new ImageData(w, h), hb = boxBlur(hole, w, h, Math.max(2, Math.round(w / 50))); // blurred hole ~ distance from the fill boundary
     // synthesized forehead skin isn't flat: soft frontal highlight in the middle, slight falloff toward the temples/hairline
     let fcx = 0, fcy = 0, frx = 1, fry = 1;
     if (aff) { fcx = (aff.c * -0.7 + aff.e) / segScaleX; fcy = (aff.d * -0.7 + aff.f) / segScaleY; frx = Math.hypot(aff.a, aff.b) / segScaleX * 0.75; fry = Math.hypot(aff.c, aff.d) / segScaleY * 0.5; }
@@ -415,22 +446,35 @@ function buildSeg(masks, w, h, prev, lmP) {
       let r = 0, g = 0, b = 0, n = 0;
       for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const i = y * w + x; if (!knownSkin[i]) continue; const cx = IA.a * x + IA.c * y + IA.e, cy = IA.b * x + IA.d * y + IA.f;
         if (cy < -0.6 && cy > -1.1 && Math.abs(cx) < 0.55) { const j = i * 4; r += px[j]; g += px[j + 1]; b += px[j + 2]; n++; } }
-      if (n > 12) fhRGB = [r / n, g / n, b / n]; out.fhRGB = fhRGB; out.fhN = n; { let c1 = 0, c2 = 0, c3 = 0, c4 = 0; for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const i = y * w + x, cx = IA.a * x + IA.c * y + IA.e, cy = IA.b * x + IA.d * y + IA.f; if (cy < -0.6 && cy > -1.1 && Math.abs(cx) < 0.55) { c1++; if (faceOnly[i]) c2++; if (hole[i] < 0.05) c3++; if (knownSkin[i]) c4++; } } out.fhDbg = [c1, c2, c3, c4]; }
+      if (n > 12) fhRGB = [r / n, g / n, b / n]; if (out.edgeRGB) fhRGB = out.edgeRGB; out.fhRGB = fhRGB; out.fhN = n; { let c1 = 0, c2 = 0, c3 = 0, c4 = 0; for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const i = y * w + x, cx = IA.a * x + IA.c * y + IA.e, cy = IA.b * x + IA.d * y + IA.f; if (cy < -0.6 && cy > -1.1 && Math.abs(cx) < 0.55) { c1++; if (faceOnly[i]) c2++; if (hole[i] < 0.05) c3++; if (knownSkin[i]) c4++; } } out.fhDbg = [c1, c2, c3, c4]; }
     }
     for (let i = 0; i < w * h; i++) {
-      const sk2 = skinFill && inOval[i], src = sk2 ? skinFill : refl;
-      let m = 1, R = src[i * 3], G = src[i * 3 + 1], B = src[i * 3 + 2];
+      // skin path vs background path, blended by the blurred (oval + cap) weight: the cap polygon's straight sides no longer show as a
+      // hard pale strip at the temples
+      const ws = skinFill && ovS ? clamp((ovS[i] - 0.05) / 0.9, 0, 1) : (skinFill && inOval[i] ? 1 : 0), sk2 = ws > 0, src = sk2 ? skinFill : refl;
+      let m = 1, R = src[i * 3], G = src[i * 3 + 1], B = src[i * 3 + 2], Rr = refl[i * 3], Gr = refl[i * 3 + 1], Br = refl[i * 3 + 2];
       if (sk2 && aff) { const dx = (i % w - fcx) / frx, dy = (Math.floor(i / w) - fcy) / fry, r2 = dx * dx + dy * dy; m = 1 + 0.03 * Math.exp(-r2 * 1.6) - 0.08 * Math.min(1, Math.max(0, r2 - 0.8)); }
       if (sk2 && fhRGB && hole[i] > 0.02) { // upper forehead / temples / cap: blend toward the forehead tone, very slightly darker toward the hair
         const x = i % w, y = (i - x) / w, cy = IA.b * x + IA.d * y + IA.f, t = clamp((-0.95 - cy) / 0.25, 0, 1);
         // continuous across the oval boundary (the old jump 0.6 -> 0.34 showed as blocky lighter patches at the temples)
-        const k2 = faceOnly[i] ? 0.6 * clamp((-0.4 - cy) / 0.3, 0, 1) : 0.6 + 0.3 * t;
-        R = R * (1 - k2) + fhRGB[0] * k2; G = G * (1 - k2) + fhRGB[1] * k2; B = B * (1 - k2) + fhRGB[2] * k2; m *= 1 - 0.05 * t;
+        const k2 = (faceOnly[i] ? 0.8 * clamp((-0.4 - cy) / 0.3, 0, 1) : 0.8 + 0.15 * t) * clamp((hb[i] - 0.4) / 0.5, 0, 1); // continuous with the local real skin at the fill boundary
+        const rr0 = out.rowRGB && (() => { const cx = IA.a * x + IA.c * y + IA.e, k = clamp(Math.floor((cy + 1.6) / 0.02), 0, 49), z = out.zoneOf(cx), a = out.rowRGB[z][k], c = out.rowRGB[1][k]; if (!a || !c || z === 1) return a || c; const t = clamp((Math.abs(cx) - 0.18) / 0.25, 0, 1); return [c[0] + (a[0] - c[0]) * t, c[1] + (a[1] - c[1]) * t, c[2] + (a[2] - c[2]) * t]; })(), ref = rr0 ? [0.7 * rr0[0] + 0.3 * fhRGB[0], 0.7 * rr0[1] + 0.3 * fhRGB[1], 0.7 * rr0[2] + 0.3 * fhRGB[2]] : fhRGB;
+        R = R * (1 - k2) + ref[0] * k2; G = G * (1 - k2) + ref[1] * k2; B = B * (1 - k2) + ref[2] * k2;
+        { // chroma from the real skin at this height (the pushed-pull fill tends to grey out -> whitish/pale look next to real skin)
+          const kc = 0.85 * clamp((hb[i] - 0.15) / 0.5, 0, 1), Lf = 0.299 * R + 0.587 * G + 0.114 * B, Lr = 0.299 * ref[0] + 0.587 * ref[1] + 0.114 * ref[2];
+          R += (Lf + ref[0] - Lr - R) * kc; G += (Lf + ref[1] - Lr - G) * kc; B += (Lf + ref[2] - Lr - B) * kc; } m = Math.min(m, 1) * (1 - 0.05 * t) * (1 - 0.1 * clamp((Math.abs(IA.a * x + IA.c * y + IA.e) - 0.45) / 0.25, 0, 1) * clamp((hb[i] - 0.3) / 0.6, 0, 1)); // temples are darker than the forehead centre
         // well above the hairline the fill is scalp under the new hair: darker, so thin/parted template hair never shows a bright skin patch
-        m *= 1 - 0.09 * clamp((-1.0 - cy) / 0.12, 0, 1) - 0.23 * clamp((-1.17 - cy) / 0.28, 0, 1);
+        m *= 1 - (0.09 * clamp((-1.0 - cy) / 0.12, 0, 1) + 0.23 * clamp((-1.17 - cy) / 0.28, 0, 1)) * clamp((hb[i] - 0.3) / 0.6, 0, 1); // ramps in from the fill boundary (no step where the hole edge is blocky)
       }
-      fid.data[i * 4] = R * m; fid.data[i * 4 + 1] = G * m; fid.data[i * 4 + 2] = B * m; fid.data[i * 4 + 3] = hole[i] * 255;
-      if (upH && IA && faceOnly[i]) { const x = i % w, y = (i - x) / w, cy = IA.b * x + IA.d * y + IA.f, cx = IA.a * x + IA.c * y + IA.e; upH.data[i * 4 + 3] = hole[i] * 255 * clamp((-0.35 - cy) / 0.2, 0, 1) * clamp((Math.abs(cx) - 0.5) / 0.15, 0, 1); }
+      if (ws < 1 && fhRGB && IA && hole[i] > 0.02) { // just outside the face at temples/cap: not the (often light) background but
+        // dim temple skin, so translucent temple hair over it never shows a pale halo
+        const x = i % w, y = (i - x) / w, cy = IA.b * x + IA.d * y + IA.f, cx = IA.a * x + IA.c * y + IA.e, wt = 0.75 * clamp((1.02 - Math.abs(cx)) / 0.2, 0, 1) * clamp((-0.3 - cy) / 0.2, 0, 1) * clamp((cy + 1.7) / 0.2, 0, 1);
+        Rr = Rr * (1 - wt) + fhRGB[0] * 0.7 * wt; Gr = Gr * (1 - wt) + fhRGB[1] * 0.67 * wt; Br = Br * (1 - wt) + fhRGB[2] * 0.66 * wt;
+      }
+      if (sk2 && IA && !faceOnly[i]) { const x = i % w, y = (i - x) / w, cx = IA.a * x + IA.c * y + IA.e; m *= 1 - 0.14 * clamp((Math.abs(cx) - 0.62) / 0.25, 0, 1); } // outer temples: shadowed
+      if (ws < 1) { R = R * m * ws + Rr * (1 - ws); G = G * m * ws + Gr * (1 - ws); B = B * m * ws + Br * (1 - ws); m = 1; }
+      fid.data[i * 4] = R * m; fid.data[i * 4 + 1] = G * m; fid.data[i * 4 + 2] = B * m; fid.data[i * 4 + 3] = (ws * Math.max(hole[i] * 0.6 + hb[i] * 0.4, hole[i] * hb[i]) + (1 - ws) * hole[i]) * 255; // feathered edge on skin
+      if (upH && IA && faceOnly[i]) { const x = i % w, y = (i - x) / w, cy = IA.b * x + IA.d * y + IA.f, cx = IA.a * x + IA.c * y + IA.e; upH.data[i * 4 + 3] = hb[i] * 255 * clamp((-0.35 - cy) / 0.2, 0, 1) * clamp((Math.abs(cx) - 0.5) / 0.15, 0, 1); }
     }
     out.upHole = upH; // synthesized (formerly hair-covered) skin inside the upper face oval: the new hair may show there
     out.fill = fid;
@@ -508,33 +552,48 @@ function naturalizeHairline(src, bk, fr, TW, TH, sid, hl, male) {
   // 1) the template's own front edge per column: first dense row scanning up from the forehead (open-forehead part only)
   const E = new Float32Array(TW).fill(NaN);
   for (let u = u0; u <= u1; u++) for (let v = vLo; v >= vHi; v--) if (src[(v * TW + u) * 4 + 3] > 128) { if (v > hlv - 0.4 * ppu && v < hlv + 0.3 * ppu) E[u] = v; break; }
-  const r = Math.max(1, Math.round(0.03 * ppu)), Es = new Float32Array(TW).fill(NaN);
+  const r = Math.max(1, Math.round(0.12 * ppu)), Es = new Float32Array(TW).fill(NaN);
   { // part lines / gaps: columns without a dense edge near the hairline take the contour interpolated from their neighbours
     let pu = -1;
     for (let u = u0; u <= u1; u++) if (E[u] === E[u]) { if (pu >= 0 && u - pu > 1 && u - pu < 0.45 * ppu) for (let q = pu + 1; q < u; q++) E[q] = E[pu] + (E[u] - E[pu]) * (q - pu) / (u - pu); pu = u; }
   }
-  for (let u = u0; u <= u1; u++) { if (E[u] !== E[u]) continue; let sm = 0, n = 0; for (let k = -r; k <= r; k++) { const e = E[u + k]; if (e === e && e !== undefined) { sm += e; n++; } } Es[u] = sm / n; }
+  // heavy smoothing (2 passes): ledges in the template's own edge must not become steps in the new hairline; the organic shape comes from off()
+  { let S0 = E; for (let pass = 0; pass < 2; pass++) { const D = new Float32Array(TW).fill(NaN);
+      for (let u = u0; u <= u1; u++) { if (E[u] !== E[u]) continue; let sm = 0, n = 0; for (let k = -r; k <= r; k++) { const e = S0[u + k]; if (e === e && e !== undefined) { sm += e; n++; } } D[u] = sm / n; }
+      S0 = D; } Es.set(S0); }
   // 2) organic contour (canonical units, + = down onto the forehead): two wavelengths of irregularity, a small widow's peak,
   //    temple recession (stronger on men's styles); seeded per style so every template has its own shape
   const ph1 = rnd() * 7, ph2 = rnd() * 7, ph3 = rnd() * 7, peak = male ? 0.006 + rnd() * 0.012 : 0.012 + rnd() * 0.018, rec = male ? 0.035 + rnd() * 0.025 : 0.012 + rnd() * 0.014;
   const off = (cx) => 0.01 * Math.sin(cx / 0.37 * 6.283 + ph1) + 0.005 * Math.sin(cx / 0.13 * 6.283 + ph2) + 0.0025 * Math.sin(cx / 0.045 * 6.283 + ph3)
     + peak * Math.exp(-((cx / 0.085) ** 2)) - rec * Math.exp(-(((Math.abs(cx) - 0.62) / 0.13) ** 2));
-  const band = (male ? 0.048 : 0.07) * ppu, tip = (male ? 0.012 : 0.018) * ppu, taper = Math.max(1, 0.012 * ppu), cont = new Float32Array(TW).fill(NaN);
+  const band = (male ? 0.048 : 0.07) * ppu, tip = (male ? 0.012 : 0.018) * ppu, taper = Math.max(2.5, 0.05 * ppu), cont = new Float32Array(TW).fill(NaN);
+  // per-column strength: ramps in over ~0.08 units from both ends of each processed run, so the edit never ends in a vertical cut
+  // next to unprocessed columns (e.g. long side hair hanging below the detection window)
+  const wc = new Float32Array(TW), ramp = 0.08 * ppu;
+  for (let u = u0; u <= u1; u++) { if (Es[u] !== Es[u]) continue; let a = u; while (a > u0 && Es[a - 1] === Es[a - 1]) a--; let b = u; while (b < u1 && Es[b + 1] === Es[b + 1]) b++;
+    for (let q = a; q <= b; q++) wc[q] = clamp(Math.min(q - a, b - q) / ramp, 0, 1); u = b; }
   for (let u = u0; u <= u1; u++) {
-    const e0 = Es[u]; if (e0 !== e0) continue;
+    const e0 = Es[u]; if (e0 !== e0) continue; const wu = wc[u]; let er = E[u] === E[u] ? E[u] : e0; // er: this column's real template edge
+    // ... moved up to the first DENSE row: the template's soft edge pixels must not be mirrored into the extension (they left a
+    // semi-transparent, lighter seam inside the new hair = the pale rim)
+    let erD = er; { const lim = Math.max(0, Math.floor(er - 0.1 * ppu)); let v = Math.floor(er); while (v > lim && src[(v * TW + u) * 4 + 3] < 230) v--; erD = v; }
     const cx = -3 + (u + 0.5) / ppu, e = e0 + off(cx) * ppu + 0.55 * band; cont[u] = e; // feather OUTWARD onto the forehead (eating into the dense hair would reveal the cap fill)
     // strand reach: per-column variation + clumps of 2-4 columns -> a fringe of strands of different length, not a fade
-    const reach = 0.6 * vnoise(cx / 0.034, 5) + 0.4 * vnoise(cx / 0.011, 17);
-    const vEnd = e - band + reach * (band + tip);
-    const vTop = Math.max(0, Math.floor(e - band - 1)), vBot = Math.min(TH - 1, Math.ceil(Math.max(e + tip, e0) + 2));
-    for (let v = Math.floor(e0) + 1; v <= Math.min(vBot, vEnd + 1); v++) { // contour below the template edge (peak): extend with hair from just above
-      const i = (v * TW + u) * 4, j = (Math.max(0, Math.round(2 * e0 - v - 2)) * TW + u) * 4;
-      for (const L of [bk, fr]) { const d = L.data; d[i] = d[j]; d[i + 1] = d[j + 1]; d[i + 3] = d[j + 3]; }
+    // smooth incommensurate sines (value noise with smoothstep gave flat plateaus + steep sides = castellated edge)
+    const reach = 0.5 + 0.22 * Math.sin(cx * 61 + ph1) + 0.16 * Math.sin(cx * 143 + ph2) + 0.12 * Math.sin(cx * 311 + ph3);
+    const vEnd = e - 0.3 * band + reach * (0.3 * band + tip) + 0.5 * taper; // long soft taper -> wisps fade out instead of blunt steps
+    const vTop = Math.max(0, Math.floor(e - band - 1)), vBot = Math.min(TH - 1, Math.ceil(Math.max(e + tip, er) + 2));
+    for (let v = Math.floor(erD) + 1; v <= Math.min(vBot, vEnd + 1); v++) { // below the dense edge (soft band + peak / notch extension): hair colour from
+      // the soft edge itself (mirrored below it), alpha raised to dense -> no see-through seam, no dark copied root blocks
+      const i = (v * TW + u) * 4, j = v <= er ? i : (Math.max(0, Math.round(2 * er - v - 1)) * TW + u) * 4;
+      const ca = bk.data[i + 3] + fr.data[i + 3], sa = bk.data[j + 3] + fr.data[j + 3], tgt = Math.max(ca, (235 * wu + ca * (1 - wu))); if (tgt <= ca + 1) continue;
+      const fb = sa > 4 ? bk.data[j + 3] / sa : 0.5;
+      for (const [L, f] of [[bk, fb], [fr, 1 - fb]]) { const d = L.data; d[i] = sa > 4 ? d[j] : d[i]; d[i + 1] = 128; d[i + 3] = tgt * f; }
     }
     for (let v = vTop; v <= vBot; v++) {
       const dd = (v - (e - band)) / band; if (dd <= 0) continue; // 0 = dense hair, 1 = contour
       const i = (v * TW + u) * 4;
-      const m = clamp((vEnd - v) / taper, 0, 1) * (1 - 0.45 * Math.min(1, dd) ** 1.5);
+      const m = 1 - wu * (1 - clamp((vEnd - v) / taper, 0, 1) * (1 - 0.45 * Math.min(1, dd) ** 1.5));
       const rt = dd < 0.75 ? 1 - 0.07 * Math.sin(Math.PI * dd / 0.75) : 0.9; // tips: no light matte halo // slightly darker roots inside the dense hair only
       for (const L of [bk, fr]) { const d = L.data; if (!d[i + 3]) continue; d[i + 3] *= m; d[i] *= rt; }
     }
@@ -551,6 +610,28 @@ function naturalizeHairline(src, bk, fr, TW, TH, sid, hl, male) {
       if (a > 150) Lr = Lr < 0 ? src[i] : Lr * 0.9 + src[i] * 0.1;
       const tot = bk.data[i + 3] + fr.data[i + 3], need = 205 * clamp((vb - v) / (0.03 * ppu), 0, 1);
       if (tot < need && Lr >= 0) { const d = bk.data; d[i] = (d[i] * d[i + 3] + Lr * 0.85 * (need - tot)) / (d[i + 3] + need - tot); d[i + 1] = 128; d[i + 3] += need - tot; }
+    }
+  }
+  // 4) anti-alias the new edge: premultiplied separable box blur (2 passes) of alpha + luminance in the hairline band only,
+  //    so the low-res lite template upscales to a soft continuous edge instead of per-column stair steps
+  let vMin = TH, vMax = 0; for (let u = u0; u <= u1; u++) { const e = cont[u]; if (e === e) { vMin = Math.min(vMin, e - band); vMax = Math.max(vMax, e + tip); } }
+  if (vMax > vMin) {
+    const ya = Math.max(1, Math.floor(vMin - 6)), yb = Math.min(TH - 2, Math.ceil(vMax + 6)), xa = Math.max(1, u0 - 4), xb = Math.min(TW - 2, u1 + 4), bw = xb - xa + 1, bh = yb - ya + 1;
+    const rr = Math.max(1, Math.round(0.012 * ppu));
+    for (const L of [bk, fr]) {
+      const d = L.data, A = new Float32Array(bw * bh), C = new Float32Array(bw * bh), T1 = new Float32Array(bw * bh), T2 = new Float32Array(bw * bh);
+      for (let y = 0; y < bh; y++) for (let x = 0; x < bw; x++) { const i = ((y + ya) * TW + x + xa) * 4; A[y * bw + x] = d[i + 3]; C[y * bw + x] = d[i] * d[i + 3]; }
+      for (let pass = 0; pass < 2; pass++) for (const [S1, S2] of [[A, T1], [C, T2]]) {
+        for (let y = 0; y < bh; y++) for (let x = 0; x < bw; x++) { let sm = 0, n = 0; for (let k = -rr; k <= rr; k++) { const xx = x + k; if (xx >= 0 && xx < bw) { sm += S1[y * bw + xx]; n++; } } S2[y * bw + x] = sm / n; }
+        for (let y = 0; y < bh; y++) for (let x = 0; x < bw; x++) { let sm = 0, n = 0; for (let k = -rr; k <= rr; k++) { const yy = y + k; if (yy >= 0 && yy < bh) { sm += S2[yy * bw + x]; n++; } } S1[y * bw + x] = sm / n; }
+      }
+      // blend in only near the edge rows (vertical weight), so the hair body keeps its strand detail
+      for (let y = 0; y < bh; y++) for (let x = 0; x < bw; x++) {
+        const u = x + xa, v = y + ya, e = cont[u]; if (e !== e) continue;
+        const wgt = clamp(1 - Math.abs(v - (e - band * 0.3)) / (band * 0.9 + 4), 0, 1); if (!wgt) continue;
+        const i = (v * TW + u) * 4, a2 = A[y * bw + x], c2 = a2 > 0.5 ? C[y * bw + x] / a2 : d[i];
+        const a0 = d[i + 3]; d[i + 3] = a0 * (1 - wgt) + a2 * wgt; if (d[i + 3] > 0.5) { const wc = (a2 * wgt) / (a0 * (1 - wgt) + a2 * wgt + 1e-3); d[i] = d[i] * (1 - wc) + c2 * wc; d[i + 1] = 128; } // colour weighted by alpha contribution (no dark fringe from empty pixels)
+      }
     }
   }
   return cont;
@@ -704,7 +785,7 @@ function compose(W, H, P, mask) {
       // skin band): extra shift = 2nd-largest deficit over the forehead columns (+0.015 overlap), capped
       const hpf = mask && mask.holeProf, pf = hpf || (mask && mask.hlProf), cc = st.contC, ad = hpf ? 0.01 : 0.03;
       if (pf && cc) { const df = []; for (let q = 0; q < 13; q++) { if (pf[q] !== pf[q] || cc[q] !== cc[q]) continue; const C = clamp(pf[q] + ad, tgt - 0.05, tgt + 0.12), Ef = -2.0 + (cc[q] + 2.0) * k + sh; df.push(C + 0.015 - Ef); }
-        if (df.length >= 4) { df.sort((p, q) => q - p); cov = clamp(df[1], 0, mask.hairline != null && mask.hairline > -0.95 ? 0.04 : 0.08); sh += cov; } } // bangs: the profile measures the fringe, not the hairline
+        if (df.length >= 4) { df.sort((p, q) => q - p); cov = clamp(df[1], 0, mask.hairline != null && mask.hairline > -0.95 ? 0.04 : 0.12); sh += cov; } } // bangs: the profile measures the fringe, not the hairline
       HA = { a: A.a, b: A.b, c: A.c * k, d: A.d * k, e: A.e + A.c * (-2.0 * (1 - k) + sh), f: A.f + A.d * (-2.0 * (1 - k) + sh) };
       fitT = tgt; stats.hairFit = { tgt: +tgt.toFixed(3), hl: st.hl, k: +k.toFixed(3), sh: +sh.toFixed(3), cov: +cov.toFixed(3) };
     }

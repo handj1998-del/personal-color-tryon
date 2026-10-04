@@ -25,3 +25,9 @@
 
 ## Font
 - H.O.W wordmark: Cormorant Garamond (Catharsis Fonts), SIL Open Font License 1.1 — `assets/fonts/OFL.txt` (Latin subset, woff2)
+
+## assets/models/ — on-device gender estimate
+- `age_gender_model.bin` + `age_gender_model-weights_manifest.json`: AgeGenderNet (TinyXception) weights from face-api.js
+  (Vincent Mühler, https://github.com/justadudewhohacks/face-api.js; distributed via @vladmandic/face-api 1.7.15) — **MIT license**.
+- Inference is a plain-JavaScript re-implementation in `gender.js` (no TensorFlow.js runtime is shipped); output verified identical
+  (to 1e-6) to the face-api.js/TensorFlow.js reference. The image never leaves the device.

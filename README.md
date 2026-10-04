@@ -17,6 +17,12 @@ Static, 100% client-side web app (index.html / style.css / app.js / frames.js / 
 
 See `assets/CREDITS.md` for asset sources and licenses. Everything runs on-device; there is no server/API feature.
 
+## 성별 자동 선택 (v19)
+- 촬영 직후 기기 안에서 성별을 추정해(`gender.js`, face-api.js AgeGenderNet 가중치 430 KB, 순수 JS 추론 · 오프라인) 헤어/안경 추천의 기본 남성·여성을 정합니다.
+- 남성: 캣아이 프레임과 핑크/라벤더/피치/로즈 계열 컬러는 추천 3개에서 제외.
+- 추천 화면 상단의 `성별 [여성|남성]` 토글에 `자동: 남성` 처럼 표시. 확신이 낮으면(0.3 < P(남) < 0.7) 여성으로 두고 토글을 강조합니다. 탭하면 추천이 다시 계산되고 실시간 모드로도 이어집니다.
+- 정확도 측정: `python3 test/gender_bench.py` (ALL=1 이면 faces 시트 112명 포함).
+
 ## 버전 · 업데이트
 - 버전은 `version.js` 한 곳에서 관리합니다 (`tools/bump-version.sh v18` 가 `version.js` + `version.json` 을 함께 갱신). `sw.js` 는 `version.js` 를 import 해서 캐시 이름(`pc-tryon-vN`)으로 쓰고, 표지·메인 하단에 `vN · 날짜` 가 표시됩니다.
 - 표지 하단 **🔄 업데이트 확인** / 메인 하단 **🔄 새로고침**: 서비스 워커 업데이트(SKIP_WAITING) → 이전 캐시 삭제 → 캐시 우회 새로고침.

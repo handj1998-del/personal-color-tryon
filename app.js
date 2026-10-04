@@ -2,6 +2,7 @@
 import { FRAMES, SHAPES, SHAPE_BY_ID, drawGlasses, shapeIconSVG, mix, rgba } from './frames.js';
 import { initGlasses3D, drawGlasses3D, preloadGlasses3D, purgeGlasses3D } from './glasses3d.js';
 import { faceMetrics, classifyFace, colorMetrics, classifyColor, recommend, SHAPES_KO } from './reco.js';
+import { loadGender, predictGender, genderReady } from './gender.js';
 import { STYLES, BANGS, OVAL_IDX, CANON, buildStyle, colorize, fitAffine, templateTransform, invAffine, styleIconSVG } from './hairstyle.js';
 
 const MP_VER = '1.0.1';
@@ -728,6 +729,9 @@ function photoStyle(id, bang) {
     const q = 4 * TW / 1080, uw = 270, uh = 333, u = mk(uw, uh), ux = u.getContext('2d', { willReadFrequently: true });
     const all = mk(TW, TH); all.getContext('2d').drawImage(img, 0, 0, TW, TH);
     { const ax = all.getContext('2d'); const d = ax.getImageData(0, 0, TW, TH); for (let i = 0; i < d.data.length; i += 4) d.data[i + 1] = 128; ax.putImageData(d, 0, 0); }
+    // near-hair cap: the boosted wide blur used to extend ~0.15 face units INSIDE the template's own hair edge at the temples, which
+    // showed through the temple openings as dark translucent rectangular bars down to the brows (short men's styles, e.g. 투블럭)
+    ux.filter = 'blur(2px)'; ux.drawImage(all, 0, 0, uw, uh); ux.filter = 'none'; const nearA = ux.getImageData(0, 0, uw, uh).data; ux.clearRect(0, 0, uw, uh);
     ux.filter = 'blur(12px)'; ux.drawImage(all, 0, 0, uw, uh); ux.filter = 'none';
     const ud = ux.getImageData(0, 0, uw, uh);
     for (let y = 0; y < uh; y++) for (let x = 0; x < uw; x++) {
@@ -735,7 +739,8 @@ function photoStyle(id, bang) {
       const side = clamp((ax2 - (cy < -0.35 ? 0.58 : 0.42)) / 0.12, 0, 1), low = clamp((cy + 0.35) / 0.15, 0, 1), ex = cx / 1.18, ey = (cy - 0.15) / 1.5, band = clamp((1 - (ex * ex + ey * ey)) / 0.12, 0, 1);
       const a = ud.data[i + 3]; if (a) { const inv = 255 / a; ud.data[i] = Math.min(255, ud.data[i]); }
       const tz = clamp((ax2 - 0.5) / 0.25, 0, 1) * clamp((1.05 - ax2) / 0.15, 0, 1) * clamp((cy + 1.4) / 0.3, 0, 1) * clamp((-0.4 - cy) / 0.35, 0, 1); // upper temples (soft box: no rectangular blocks)
-      ud.data[i + 3] = Math.min(255, a * (4 + 7 * tz)) * Math.max(side, low) * Math.max(band, tz); ud.data[i + 1] = 128;
+      const cap = cy < -0.3 && ax2 < 0.95 ? Math.min(255, nearA[i + 3] * 3) : 255; // inside the upper face: only right next to real template hair
+      ud.data[i + 3] = Math.min(cap, Math.min(255, a * (4 + 7 * tz)) * Math.max(side, low) * Math.max(band, tz)); ud.data[i + 1] = 128;
     }
     ux.putImageData(ud, 0, 0);
     const under = u; // kept at quarter resolution (it is a blurred layer anyway); drawn stretched to the template size
@@ -1259,7 +1264,8 @@ async function rcBackToCapture() {
 }
 function recoFlow() { // resolves with 'live' | 'skip'
   if (crashedAt && !rc.noticed) { rc.noticed = true; toast('이전 실행에서 메모리가 부족했어요. 이 기기에서는 가벼운 모드로 진행할게요.', 5000); }
-  rc.el.hidden = false; document.body.classList.add('reco-on'); rcShow('rcCap'); rc.gender = S.gender || 'f'; rc.camWanted = cameraOK;
+  rc.el.hidden = false; document.body.classList.add('reco-on'); rcShow('rcCap'); rc.gender = S.gender || 'f'; rc.gEst = null; rc.camWanted = cameraOK;
+  loadGender().catch((e) => console.warn('gender model', e)); // ~430 KB, cached offline by the SW; loads while the customer poses
   $('rcShot').disabled = !cameraOK; $('rcHint').textContent = (cameraOK ? '정면을 바라봐 주세요' : '카메라를 쓸 수 없어요 · 사진을 올려 주세요') + (ULTRA ? ' · 가벼운 모드' : '');
   if (cameraOK) rcPreviewLoop();
   return new Promise((r) => { rc.done = r; });
@@ -1289,7 +1295,10 @@ async function rcAnalyze(src, sw, sh, mir, bmp) {
     freeCanvas(snap); snap = null;
     const p = window.__pc.rawLm;
     if (!lm || !p) { toast('얼굴을 찾지 못했어요. 정면으로 다시 찍어 주세요.'); await rcBackToCapture(); return; }
-    // 3) face shape + colour
+    // 3) gender estimate (on device) -> default 남성/여성 for hair + glasses; unsure -> 여성 as before, toggle highlighted
+    rcProgress('얼굴을 분석하는 중…'); await yieldUI();
+    rc.gManual = false; rc.gEst = await rcEstimateGender(p); rc.gender = rc.gEst && rc.gEst.sure ? rc.gEst.g : 'f';
+    // 4) face shape + colour
     rcProgress('퍼스널컬러를 분석하는 중…'); await yieldUI();
     let fm = null, fc, cm = null, cc;
     try { fm = faceMetrics(p); fc = classifyFace(fm); } catch (e) { console.warn('face shape failed', e); fc = { shape: 'oval', scores: {} }; }
@@ -1306,6 +1315,35 @@ async function rcAnalyze(src, sw, sh, mir, bmp) {
     rcThumbsLazy();
   } catch (e) { console.error(e); toast('분석 중 오류가 났어요. 다시 찍어 주세요.'); await rcBackToCapture(); }
   finally { if (snap) freeCanvas(snap); rc.busy = false; }
+}
+// P(male) from face-api.js's AgeGenderNet (gender.js) on a detector-like square face crop from the landmarks, averaged with the
+// mirrored crop. Thresholds: >= 0.7 남성, <= 0.3 여성, else unsure.
+async function rcEstimateGender(p) {
+  try {
+    crumb('gender');
+    await Promise.race([loadGender(), sleep(8000).then(() => { throw new Error('gender model timeout'); })]);
+    if (!genderReady() || !rawC || !p) return null;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity; for (const q of p) { x0 = Math.min(x0, q[0]); y0 = Math.min(y0, q[1]); x1 = Math.max(x1, q[0]); y1 = Math.max(y1, q[1]); }
+    const bw = x1 - x0, bh = y1 - y0;
+    // test-time augmentation: the net is sensitive to the exact crop, so average a few detector-like crops (+ mirrored on full mode)
+    // [side pad, top pad, bottom pad] as fractions of the landmark box; ~0.15-0.3 s per pass on a phone, ultra-lite: one pass
+    const crops = ULTRA ? [[0.06, 0.15, -0.02]] : [[0, 0, 0], [0.1, 0.15, 0.05], [0.06, 0.15, -0.02]], flip = !LITE && !ULTRA;
+    const c = document.createElement('canvas'); c.width = c.height = 112; const cx = c.getContext('2d', { willReadFrequently: true });
+    let sum = 0, n = 0, age = 0; const passes = [];
+    for (const [ex, et, eb] of crops) {
+      const X = x0 - ex * bw, Y = y0 - et * bh, Wb = bw * (1 + 2 * ex), Hb = bh * (1 + et + eb), sz = Math.max(Wb, Hb), sc = 112 / sz;
+      for (const fl of flip ? [false, true] : [false]) {
+        cx.setTransform(1, 0, 0, 1, 0, 0); cx.fillStyle = '#000'; cx.fillRect(0, 0, 112, 112); cx.imageSmoothingQuality = 'high';
+        if (fl) { cx.translate(112, 0); cx.scale(-1, 1); }
+        cx.drawImage(rawC, X, Y, Wb, Hb, (sz - Wb) / 2 * sc, (sz - Hb) / 2 * sc, Wb * sc, Hb * sc);
+        const r = predictGender(cx.getImageData(0, 0, 112, 112).data); sum += r.male; age += r.age; n++; passes.push(+r.male.toFixed(3)); await yieldUI();
+      }
+    }
+    freeCanvas(c); const pm = sum / n, a = { age: age / n };
+    const g = pm >= 0.5 ? 'm' : 'f', sure = pm >= 0.7 || pm <= 0.3;
+    window.__pc.genderEst = { pMale: pm, g, sure, age: a.age, passes, src: [rawC.width, rawC.height] };
+    return { pMale: pm, g, sure };
+  } catch (e) { console.warn('gender estimate failed', e); return null; }
 }
 async function rcBuild() {
   const a = rc.an, gen = ++rc.gen;
@@ -1363,6 +1401,12 @@ function rcRenderText() {
   $('rcTypes').innerHTML = Object.entries(TYPES).map(([k, t]) => `<button class="${a.type === k ? 'on' : ''}" data-type="${k}">${t.n}</button>`).join('');
   $('rcSubs').innerHTML = T.subs.map(([k, n]) => `<button class="${a.sub === k ? 'on' : ''}" data-sub="${k}">${n}</button>`).join('');
   $('rcGender').innerHTML = [['f', '여성'], ['m', '남성']].map(([k, n]) => `<button class="${rc.gender === k ? 'on' : ''}" data-g="${k}">${n}</button>`).join('');
+  { // gender bar at the top of the results: shows the automatic choice; highlighted when the estimate was unsure / unavailable
+    const e = rc.gEst, KO = { m: '남성', f: '여성' }, manual = rc.gManual, unsure = !e || !e.sure;
+    $('rcGBar').classList.toggle('ask', unsure && !manual);
+    $('rcGBtns').innerHTML = [['f', '여성'], ['m', '남성']].map(([k, n]) => `<button class="${rc.gender === k ? 'on' : ''}" data-g="${k}" aria-pressed="${rc.gender === k}">${n}</button>`).join('');
+    $('rcGNote').textContent = manual ? `직접 선택: ${KO[rc.gender]}` + (e && e.sure && e.g !== rc.gender ? ` (자동: ${KO[e.g]})` : '') : unsure ? (e ? '자동 판단이 어려워요 · 성별을 선택해 주세요' : '성별을 선택해 주세요') : `자동: ${KO[e.g]}`;
+  }
   const shN = (id) => SHAPES.find((q) => q.id === id)?.n || id, stN = (id) => STYLES.find((q) => q.id === id)?.n || id;
   $('rcGlasses').innerHTML = rc.res.glasses.map((g, i) => `<li class="${rc.sel && rc.sel.g === g ? 'on' : ''}" data-k="g" data-i="${i}"><b>${shN(g.shape)} · ${FRAMES[g.frame].n}</b><span>${g.why}</span></li>`).join('');
   $('rcHair').innerHTML = rc.res.hair.map((h, i) => `<li class="${rc.sel && rc.sel.h === h ? 'on' : ''}" data-k="h" data-i="${i}"><b>${stN(h.style)}${h.bang && BANGS[h.bang] && h.bang !== 'none' ? ' · ' + BANGS[h.bang].n : ''}</b><span>${h.why}</span></li>`).join('');
@@ -1380,7 +1424,8 @@ function rcBind() {
   ['rcGlasses', 'rcHair', 'rcColors'].forEach((id) => { $(id).onclick = lists; });
   $('rcTypes').onclick = async (e) => { const b = e.target.closest('[data-type]'); if (!b || rc.busy) return; rc.an.type = b.dataset.type; rc.an.sub = rc.an.type === rc.an.cc.type ? rc.an.cc.sub : TYPES[rc.an.type].subs[0][0]; rc.busy = true; try { await rcBuild(); rcThumbsLazy(); } finally { rc.busy = false; } };
   $('rcSubs').onclick = async (e) => { const b = e.target.closest('[data-sub]'); if (!b || rc.busy) return; rc.an.sub = b.dataset.sub; rc.busy = true; try { await rcBuild(); rcThumbsLazy(); } finally { rc.busy = false; } };
-  $('rcGender').onclick = async (e) => { const b = e.target.closest('[data-g]'); if (!b || rc.busy) return; rc.gender = b.dataset.g; rc.busy = true; try { await rcBuild(); rcThumbsLazy(); } finally { rc.busy = false; } };
+  const pickG = async (e) => { const b = e.target.closest('[data-g]'); if (!b || rc.busy) return; rc.gManual = true; rc.gender = b.dataset.g; rc.busy = true; try { await rcBuild(); rcThumbsLazy(); } finally { rc.busy = false; } };
+  $('rcGender').onclick = pickG; $('rcGBtns').onclick = pickG;
   $('rcGo').onclick = async () => { // apply the previewed combo to the main screen, then go live
     if (rc.going) return; rc.going = true; rc.gen++; await rc.q; rc.going = false; // let a running preview finish first
     const c = rc.sel; Object.assign(S, { type: rc.an.type, sub: rc.an.sub, gender: rc.gender, style: c.h.style, bang: c.h.bang, hair: c.c.hair, shape: c.g.shape, frame: c.g.frame });
@@ -1462,6 +1507,7 @@ window.__pc.setHairByName = (n) => { S.hair = n === 'orig' ? null : Object.value
 window.__pc.selectStyle = (id, bang) => { selectStyle(id, bang); return new Promise((r) => setTimeout(r, 60)).then(() => { currentStyle(); rerender(); }); };
 window.__pc.set = (o) => { Object.assign(S, o); renderTypes(); renderHair(); renderFrames(); renderShapes(); renderStyles(); rerender(); };
 window.__pc.loadSample = loadSample;
+window.__pc.estimateGender = () => rcEstimateGender(window.__pc.rawLm); // test hook (photo mode)
 boot().then(() => { window.__pc.ready = true; });
 
 // ---------- PWA: service worker + install button ----------

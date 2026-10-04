@@ -128,15 +128,19 @@ export const HAIR_BY_FACE = {
 };
 export const COLOR_REASON = { spring: '밝고 따뜻한 톤이 피부를 화사하게', summer: '부드럽고 차분한 쿨톤이 피부를 맑게', autumn: '깊고 따뜻한 톤이 피부에 윤기를', winter: '선명하고 차가운 톤이 이목구비를 또렷하게' };
 const isMetal = (FRAMES, f) => FRAMES[f] && FRAMES[f].kind === 'metal';
+// for men: no cat-eye (the face-shape lists have a 4th entry that moves up) and no pink / lavender / peach / rose frame colours
+export const FEM_SHAPES = new Set(['cateye']);
+export const FEM_FRAMES = new Set(['rosegold', 'clearpink', 'clearpeach', 'clearlav', 'gradrose', 'gradlav', 'ivory']);
 export function recommend({ shape, type, sub, gender, TYPES, FRAMES, SHAPE_BY_ID }) {
-  const T = TYPES[type];
-  const gl = GLASSES_BY_FACE[shape].filter(([s]) => SHAPE_BY_ID[s]).slice(0, 3);
+  const T = TYPES[type], male = gender === 'm';
+  const gl = GLASSES_BY_FACE[shape].filter(([s]) => SHAPE_BY_ID[s] && !(male && FEM_SHAPES.has(s))).slice(0, 3);
   // frame colours: alternate metal / acetate from the type palette so the three looks differ
-  const metals = T.frames.filter((f) => isMetal(FRAMES, f)), aces = T.frames.filter((f) => !isMetal(FRAMES, f));
+  const pal = male && T.frames.some((f) => !FEM_FRAMES.has(f)) ? T.frames.filter((f) => !FEM_FRAMES.has(f)) : T.frames;
+  const metals = pal.filter((f) => isMetal(FRAMES, f)), aces = pal.filter((f) => !isMetal(FRAMES, f));
   const thinShapes = new Set(['rimless', 'halfrim', 'titanium', 'browline']);
   const glasses = gl.map(([s, why], i) => {
     const pref = thinShapes.has(s) ? metals : i % 2 === 0 ? aces : metals;
-    const f = (pref.length ? pref : T.frames)[Math.floor(i / 2) % (pref.length || T.frames.length)];
+    const f = (pref.length ? pref : pal)[Math.floor(i / 2) % (pref.length || pal.length)];
     return { shape: s, frame: f, why, colorWhy: `${FRAMES[f].n} · ${T.n} 팔레트` };
   });
   const hair = HAIR_BY_FACE[gender][shape].slice(0, 3).map(([style, bang, why]) => ({ style, bang, why }));

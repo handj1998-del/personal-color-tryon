@@ -1170,6 +1170,102 @@ async function share0() {
   try { await navigator.share({ files: [file], title: '퍼스널컬러 가상 피팅' }); } catch (e) { if (e.name !== 'AbortError') toast('공유할 수 없어요'); }
 }
 
+/* ------------------------------------------------------------------ result sheet (share) */
+// One H.O.W-branded portrait sheet (ivory / charcoal): type, face shape, before/after, the final look, the top-3 and a note.
+// Rendered once on demand into a single canvas, encoded, then released (S23 lite: ~1080x1820 = 8 MB for a moment).
+const SH = { W: 1080, ink: '#2b2a28', mute: '#8f8a83', ivory: '#faf8f4', card: '#ffffff', line: '#e7e1d8' };
+function shCrop(src, srcLm, k, mirrorIt, dst, dx, dy, dw, dh) { // face-centred crop of src (lm in src/k pixels) into dst rect
+  const x = dst.getContext('2d'); x.save(); x.beginPath(); x.roundRect(dx, dy, dw, dh, 22); x.clip(); x.fillStyle = '#eee9e2'; x.fillRect(dx, dy, dw, dh);
+  let cx = src.width / 2, cy = src.height / 2, hh = src.height;
+  if (srcLm) { const fh = Math.hypot(srcLm.chin.x - srcLm.top.x, srcLm.chin.y - srcLm.top.y) * k; cx = (srcLm.top.x + srcLm.chin.x) / 2 * k; cy = ((srcLm.top.y + srcLm.chin.y) / 2) * k - fh * 0.1; hh = Math.min(fh * 2.2, src.height); }
+  let ww = hh * dw / dh; if (ww > src.width) { ww = src.width; hh = ww * dh / dw; }
+  cx = clamp(cx, ww / 2, src.width - ww / 2); cy = clamp(cy, hh / 2, src.height - hh / 2);
+  if (mirrorIt) { x.translate(dx + dw, dy); x.scale(-1, 1); x.drawImage(src, cx - ww / 2, cy - hh / 2, ww, hh, 0, 0, dw, dh); }
+  else x.drawImage(src, cx - ww / 2, cy - hh / 2, ww, hh, dx, dy, dw, dh);
+  x.restore();
+}
+function shText(x, t, X, Y, font, color, maxW) { x.font = font; x.fillStyle = color; x.fillText(t, X, Y, maxW); }
+function shSwatch(x, X, Y, r, c, c2) { x.save(); x.beginPath(); x.arc(X, Y, r, 0, Math.PI * 2); if (c2) { const g = x.createLinearGradient(X, Y - r, X, Y + r); g.addColorStop(0, c); g.addColorStop(1, c2); x.fillStyle = g; } else x.fillStyle = c; x.fill(); x.lineWidth = 2; x.strokeStyle = '#0000001a'; x.stroke(); x.restore(); }
+const lookTexts = (st, bang, hair, shape, frame) => {
+  const stl = STYLES.find((q) => q.id === st), sh = SHAPES.find((q) => q.id === shape), fr = FRAMES[frame];
+  return { hair: st && st !== 'none' && stl ? stl.n + (bang && BANGS[bang] && bang !== 'none' && bang !== stl.bang ? ' · ' + BANGS[bang].n : '') : '현재 헤어 유지',
+    color: hair ? hair.n : '원래 컬러', colorC: hair && hair.c, glasses: shape && shape !== 'none' && sh && fr ? `${sh.n} · ${fr.n}` : '안경 없음', frameC: fr && (fr.c2 ? null : fr.c), frame: fr };
+};
+async function buildSheet() {
+  try { await document.fonts.load('300 120px "HOW Serif"'); } catch (e) {}
+  const T = TYPES[S.type], sub = T.subs.find((q) => q[0] === S.sub)?.[1] || '', an = rc.an, top = rc.combos && rc.combos.length && an ? rc.combos : null;
+  const W = SH.W, pad = 64, H = top ? 1950 : 1580, c = mk(W, H), x = c.getContext('2d');
+  x.fillStyle = SH.ivory; x.fillRect(0, 0, W, H);
+  // header
+  x.textBaseline = 'alphabetic'; x.textAlign = 'center';
+  shText(x, 'H.O.W', W / 2, 150, '300 112px "HOW Serif", Georgia, serif', SH.ink);
+  x.fillStyle = SH.ink; x.globalAlpha = 0.35; x.fillRect(W / 2 - 26, 184, 52, 2); x.globalAlpha = 1;
+  shText(x, '퍼스널컬러 가상 피팅 결과', W / 2, 238, '500 30px "Pretendard", "Noto Sans KR", sans-serif', '#55514b');
+  const d = new Date(), ds = `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`;
+  shText(x, ds, W / 2, 282, '400 24px "Pretendard", "Noto Sans KR", sans-serif', SH.mute);
+  // before / after (after = the composed look with full-res glasses)
+  const iy = 320, iw = (W - pad * 2 - 24) / 2, ih = Math.round(iw * 1.25);
+  const aft = mk(); const was = { compare: S.compare, holdBefore: S.holdBefore }; S.compare = 'after'; S.holdBefore = false;
+  try { present(aft, false); } finally { Object.assign(S, was); }
+  const k = rawC.width ? aft.width / rawC.width : 1;
+  shCrop(rawC, lm, 1, mirror, c, pad, iy, iw, ih); shCrop(aft, lm, k, mirror, c, pad + iw + 24, iy, iw, ih); freeCanvas(aft);
+  x.textAlign = 'left';
+  for (const [t, X] of [['BEFORE', pad], ['AFTER', pad + iw + 24]]) { x.fillStyle = '#ffffffe0'; x.beginPath(); x.roundRect(X + 18, iy + ih - 62, t === 'BEFORE' ? 128 : 112, 42, 21); x.fill(); shText(x, t, X + 36, iy + ih - 32, '600 22px "Pretendard", sans-serif', SH.ink); }
+  // diagnosis row
+  let y = iy + ih + 48; x.textAlign = 'left';
+  const chip = (X, w, lab, val) => { x.fillStyle = SH.card; x.strokeStyle = SH.line; x.lineWidth = 2; x.beginPath(); x.roundRect(X, y, w, 116, 20); x.fill(); x.stroke();
+    shText(x, lab, X + 28, y + 42, '500 22px "Pretendard", sans-serif', SH.mute); shText(x, val, X + 28, y + 90, '700 36px "Pretendard", sans-serif', SH.ink, w - 56); };
+  const cw = (W - pad * 2 - 24) / 2;
+  chip(pad, cw, '퍼스널컬러', `${T.n} ${sub}`.trim()); chip(pad + cw + 24, cw, '얼굴형', an && an.fc ? SHAPES_KO[an.fc.shape] : '—');
+  y += 116 + 40;
+  // final look
+  const L = lookTexts(S.style, S.bang, S.hair, S.shape, S.frame);
+  shText(x, '최종 선택', pad, y + 30, '700 30px "Pretendard", sans-serif', SH.ink); y += 52;
+  x.fillStyle = SH.card; x.strokeStyle = SH.line; x.beginPath(); x.roundRect(pad, y, W - pad * 2, 212, 20); x.fill(); x.stroke();
+  const row = (yy, lab, val, sw) => { shText(x, lab, pad + 28, yy, '500 24px "Pretendard", sans-serif', SH.mute); if (sw) shSwatch(x, pad + 200, yy - 8, 15, sw[0], sw[1]); shText(x, val, pad + (sw ? 228 : 190), yy, '600 28px "Pretendard", sans-serif', SH.ink, W - pad * 2 - 260); };
+  row(y + 56, '헤어스타일', L.hair); row(y + 118, '헤어 컬러', L.color, L.colorC ? [L.colorC] : null);
+  row(y + 180, '안경', L.glasses, L.frame && S.shape !== 'none' ? [L.frame.c, L.frame.c2] : null);
+  y += 212 + 40;
+  if (top) { // the analysis' top-3
+    shText(x, '추천 TOP 3', pad, y + 30, '700 30px "Pretendard", sans-serif', SH.ink); y += 52;
+    x.fillStyle = SH.card; x.strokeStyle = SH.line; x.beginPath(); x.roundRect(pad, y, W - pad * 2, 3 * 96 + 16, 20); x.fill(); x.stroke();
+    top.slice(0, 3).forEach((cb, i) => { const t = lookTexts(cb.h.style, cb.h.bang, cb.c.hair, cb.g.shape, cb.g.frame), yy = y + 60 + i * 96;
+      shText(x, String(i + 1), pad + 30, yy, '400 40px "HOW Serif", Georgia, serif', SH.ink);
+      shText(x, t.hair, pad + 86, yy - 12, '600 26px "Pretendard", sans-serif', SH.ink, 330);
+      shSwatch(x, pad + 98, yy + 22, 11, cb.c.hair.c); shText(x, t.color, pad + 118, yy + 30, '400 22px "Pretendard", sans-serif', '#55514b', 300);
+      shSwatch(x, pad + 470, yy - 20, 11, t.frame ? t.frame.c : '#ccc', t.frame && t.frame.c2); shText(x, t.glasses, pad + 492, yy - 12, '500 24px "Pretendard", sans-serif', SH.ink, W - pad * 2 - 520);
+      if (i < 2) { x.fillStyle = SH.line; x.fillRect(pad + 24, yy + 50, W - pad * 2 - 48, 2); } });
+    y += 3 * 96 + 16 + 34;
+  }
+  // note + footer
+  x.textAlign = 'center';
+  shText(x, '얼굴 비율과 피부·모발 색을 기기 안에서 분석한 참고용 결과입니다.', W / 2, H - 112, '400 22px "Pretendard", sans-serif', SH.mute);
+  shText(x, '조명·카메라에 따라 달라질 수 있으니 최종 선택은 컨설턴트와 상의해 주세요.', W / 2, H - 78, '400 22px "Pretendard", sans-serif', SH.mute);
+  shText(x, 'H.O.W  ·  ' + ds, W / 2, H - 30, '400 22px "HOW Serif", Georgia, serif', '#b5afa6');
+  return c;
+}
+let sharing = false; // the share sheet is open (or the sheet is being built): idle timer + double taps stay away
+async function shareSheet(from) {
+  if (sharing || exporting || !lm || rawC.width < 2) { if (!lm && !sharing) toast('얼굴이 보일 때 공유할 수 있어요'); return; }
+  sharing = true; crumb('share'); let c = null;
+  try {
+    if (from === 'reco' && rc.sel && !ULTRA) await rcQueue(() => rcRender(rc.sel, $('rcMain'), 'main')); // outC = the selected combo
+    c = await buildSheet();
+    const blob = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.92)); freeCanvas(c); c = null;
+    const name = `HOW_퍼스널컬러_${new Date().toISOString().slice(0, 10)}.jpg`, file = new File([blob], name, { type: 'image/jpeg' });
+    window.__pc.lastSheet = { size: blob.size, name };
+    if (window.__pc.sheetHook) { await window.__pc.sheetHook(blob); return; } // tests
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try { await navigator.share({ files: [file], title: 'H.O.W 퍼스널컬러 결과', text: 'H.O.W 퍼스널컬러 가상 피팅 결과' }); return; }
+      catch (e) { if (e.name === 'AbortError') return; console.warn('share failed, saving instead', e); }
+    }
+    const url = URL.createObjectURL(blob), aEl = document.createElement('a'); aEl.href = url; aEl.download = name; document.body.appendChild(aEl); aEl.click(); aEl.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000); toast('결과 이미지를 저장했어요 (갤러리 · 다운로드)');
+  } catch (e) { console.warn(e); toast('결과 이미지를 만들지 못했어요 · 다시 눌러 주세요'); }
+  finally { if (c) freeCanvas(c); sharing = false; lastActive = Date.now(); }
+}
+window.__pc.buildSheet = buildSheet; window.__pc.shareSheet = shareSheet;
+
 /* ------------------------------------------------------------------ UI */
 function rerender() { if (S.mode === 'still') renderStill(); }
 initGlasses3D(() => rerender());
@@ -1262,8 +1358,7 @@ function bindUI() {
   $('btnPhoto').onclick = showPhotoMode; $('phSample').onclick = loadSample;
   $('btnFlip').onclick = async () => { if (camP) return; S.facing = S.facing === 'user' ? 'environment' : 'user'; cameraOK = false; await goLive(); };
   $('fileInput').onchange = (e) => loadFile(e.target.files[0]); $('fileInput2').onchange = (e) => loadFile(e.target.files[0]);
-  $('btnSave').onclick = save;
-  if (navigator.canShare && navigator.canShare({ files: [new File([''], 'a.png', { type: 'image/png' })] })) { $('btnShare').hidden = false; $('btnShare').onclick = share; }
+  $('btnSave').onclick = save; $('btnSheet').onclick = () => shareSheet('main');
 }
 
 /* ------------------------------------------------------------------ boot */
@@ -1335,7 +1430,9 @@ async function rcAnalyze(src, sw, sh, mir, bmp) {
     if (!lm || !p) { toast('얼굴을 찾지 못했어요. 정면으로 다시 찍어 주세요.'); await rcBackToCapture(); return; }
     // 3) gender estimate (on device) -> default 남성/여성 for hair + glasses; unsure -> 여성 as before, toggle highlighted
     rcProgress('얼굴을 분석하는 중…'); await yieldUI();
-    rc.gManual = false; rc.gEst = await rcEstimateGender(p); rc.gender = rc.gEst && rc.gEst.sure ? rc.gEst.g : 'f';
+    rc.gManual = false;
+    if (SET.gender !== 'auto') { rc.gEst = { pMale: NaN, g: SET.gender, sure: true, fixed: true }; rc.gender = SET.gender; } // settings: fixed default, no estimate
+    else { rc.gEst = await rcEstimateGender(p); rc.gender = rc.gEst && rc.gEst.sure ? rc.gEst.g : 'f'; }
     // 4) face shape + colour
     rcProgress('퍼스널컬러를 분석하는 중…'); await yieldUI();
     let fm = null, fc, cm = null, cc;
@@ -1443,7 +1540,7 @@ function rcRenderText() {
     const e = rc.gEst, KO = { m: '남성', f: '여성' }, manual = rc.gManual, unsure = !e || !e.sure;
     $('rcGBar').classList.toggle('ask', unsure && !manual);
     $('rcGBtns').innerHTML = [['f', '여성'], ['m', '남성']].map(([k, n]) => `<button class="${rc.gender === k ? 'on' : ''}" data-g="${k}" aria-pressed="${rc.gender === k}">${n}</button>`).join('');
-    $('rcGNote').textContent = manual ? `직접 선택: ${KO[rc.gender]}` + (e && e.sure && e.g !== rc.gender ? ` (자동: ${KO[e.g]})` : '') : unsure ? (e ? '자동 판단이 어려워요 · 성별을 선택해 주세요' : '성별을 선택해 주세요') : `자동: ${KO[e.g]}`;
+    $('rcGNote').textContent = e && e.fixed && !manual ? `기본: ${KO[e.g]} (설정)` : manual ? `직접 선택: ${KO[rc.gender]}` + (e && e.sure && e.g !== rc.gender ? ` (자동: ${KO[e.g]})` : '') : unsure ? (e ? '자동 판단이 어려워요 · 성별을 선택해 주세요' : '성별을 선택해 주세요') : `자동: ${KO[e.g]}`;
   }
   const shN = (id) => SHAPES.find((q) => q.id === id)?.n || id, stN = (id) => STYLES.find((q) => q.id === id)?.n || id;
   $('rcGlasses').innerHTML = rc.res.glasses.map((g, i) => `<li class="${rc.sel && rc.sel.g === g ? 'on' : ''}" data-k="g" data-i="${i}"><b>${shN(g.shape)} · ${FRAMES[g.frame].n}</b><span>${g.why}</span></li>`).join('');
@@ -1457,6 +1554,7 @@ function rcBind() {
   $('rcShot').onclick = () => { const cs = camSrc(); if (cameraOK && cs) rcAnalyze(cs[0], cs[1], cs[2], mirror); };
   $('rcFile').onchange = async (e) => { const f = e.target.files[0]; e.target.value = ''; if (!f || rc.busy) return; try { const bmp = await decodePhoto(f); rcAnalyze(bmp, bmp.width, bmp.height, false, bmp); } catch (er) { toast('사진을 열 수 없어요'); } };
   $('rcRetake').onclick = () => { if (!rc.busy) rcBackToCapture(); };
+  $('rcShare').onclick = () => { if (!rc.busy) shareSheet('reco'); };
   $('rcThumbs').onclick = (e) => { const b = e.target.closest('[data-i]'); if (!b || rc.busy) return; [...$('rcThumbs').children].forEach((q) => q.classList.toggle('on', q === b)); rcSelect({ ...rc.combos[+b.dataset.i] }); };
   const lists = (e) => { const li = e.target.closest('li[data-k]'); if (!li || rc.busy) return; const k = li.dataset.k, i = +li.dataset.i; const src = k === 'g' ? rc.res.glasses : k === 'h' ? rc.res.hair : rc.res.colors; rcSelect({ ...rc.sel, [k]: src[i] }); };
   ['rcGlasses', 'rcHair', 'rcColors'].forEach((id) => { $(id).onclick = lists; });
@@ -1470,6 +1568,53 @@ function rcBind() {
     renderTypes(); renderHair(); renderFrames(); renderShapes(); renderStyles();
     rcClose('live');
   };
+}
+
+/* ------------------------------------------------------------------ settings + idle auto-return */
+// Hidden consultant settings (long-press the H.O.W wordmark 2 s): idle minutes (0 = off) and the default gender. localStorage.
+const SET = (() => { let s = {}; try { s = JSON.parse(localStorage.getItem('pcSettings') || '{}') || {}; } catch (e) {}
+  return { idle: [0, 1, 3, 5, 10].includes(s.idle) ? s.idle : 3, gender: ['auto', 'f', 'm'].includes(s.gender) ? s.gender : 'auto' }; })();
+function saveSet() { try { localStorage.setItem('pcSettings', JSON.stringify(SET)); } catch (e) {} }
+window.__pc.SET = SET;
+const IDLE_MS = () => QP0.has('idle') ? +QP0.get('idle') * 1000 : SET.idle * 60000, IDLE_CD = QP0.has('idlecd') ? +QP0.get('idlecd') : 10;
+let lastActive = Date.now(), idleCd = 0, idleT = 0;
+const poke = () => { lastActive = Date.now(); if (idleCd) idleHide(); };
+['pointerdown', 'keydown', 'wheel', 'touchstart'].forEach((t) => addEventListener(t, poke, { capture: true, passive: true }));
+function idleBlocked() { // never during the share sheet, an analysis, model loading or with the app in the background
+  return !!coverResolve || sharing || exporting || rc.busy || homing || document.hidden || !modelsReady || !$('setSheet').hidden;
+}
+function idleHide() { if (!idleCd) return; idleCd = 0; $('idleBox').hidden = true; }
+function idleTick() {
+  const ms = IDLE_MS();
+  if (!ms || idleBlocked()) { if (idleCd) idleHide(); if (document.hidden || coverResolve || sharing || rc.busy) lastActive = Date.now(); return; }
+  if (!idleCd) { if (Date.now() - lastActive >= ms) { idleCd = IDLE_CD; $('idleBox').hidden = false; $('idleN').textContent = idleCd; } return; }
+  idleCd--; $('idleN').textContent = Math.max(0, idleCd);
+  if (idleCd <= 0) { idleCd = 0; $('idleBox').hidden = true; lastActive = Date.now(); crumb('idle'); nextCustomer('idle'); }
+}
+idleT = setInterval(idleTick, 1000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) lastActive = Date.now(); });
+function bindSettings() {
+  $('idleGo').onclick = (e) => { e.stopPropagation(); idleHide(); lastActive = Date.now(); };
+  $('idleNow').onclick = (e) => { e.stopPropagation(); idleHide(); nextCustomer('idle'); };
+  const render = () => {
+    $('setIdle').innerHTML = [[0, '끄기'], [1, '1분'], [3, '3분'], [5, '5분'], [10, '10분']].map(([v, n]) => `<button type="button" class="${SET.idle === v ? 'on' : ''}" data-idle="${v}" aria-pressed="${SET.idle === v}">${n}</button>`).join('');
+    $('setGender').innerHTML = [['auto', '자동'], ['f', '여성'], ['m', '남성']].map(([v, n]) => `<button type="button" class="${SET.gender === v ? 'on' : ''}" data-sg="${v}" aria-pressed="${SET.gender === v}">${n}</button>`).join('');
+  };
+  $('setIdle').onclick = (e) => { const b = e.target.closest('[data-idle]'); if (!b) return; SET.idle = +b.dataset.idle; saveSet(); render(); };
+  $('setGender').onclick = (e) => { const b = e.target.closest('[data-sg]'); if (!b) return; SET.gender = b.dataset.sg; saveSet(); render();
+    if (SET.gender !== 'auto' && !rc.an && coverResolve == null && S.gender !== SET.gender) { S.gender = SET.gender; renderStyles(); } };
+  $('setClose').onclick = () => { $('setSheet').hidden = true; lastActive = Date.now(); };
+  $('setSheet').addEventListener('click', (e) => { if (e.target === $('setSheet')) $('setSheet').hidden = true; });
+  // 2 s long-press on any H.O.W wordmark (header, recommendation header, cover); the release after it must not start the cover
+  let lpT = 0, swallow = false;
+  const open = () => { render(); $('setVer').textContent = (self.APP_VERSION || '') + (self.APP_DATE ? ' · ' + self.APP_DATE : ''); $('setSheet').hidden = false; swallow = true; if (navigator.vibrate) try { navigator.vibrate(30); } catch (e) {} };
+  for (const el of document.querySelectorAll('.wordmark, .cv-mark')) {
+    el.addEventListener('pointerdown', () => { clearTimeout(lpT); lpT = setTimeout(open, 2000); });
+    ['pointerup', 'pointerleave', 'pointercancel'].forEach((t) => el.addEventListener(t, () => clearTimeout(lpT)));
+    el.addEventListener('contextmenu', (e) => e.preventDefault());
+  }
+  coverEl.addEventListener('click', (e) => { if (swallow || !$('setSheet').hidden) { e.stopImmediatePropagation(); swallow = false; } }, true);
+  window.__pc.openSettings = open;
 }
 
 /* ------------------------------------------------------------------ background / foreground */
@@ -1502,12 +1647,25 @@ function purgeStillCaches() { // next customer: drop all decoded / colourised ha
   try { purgeGlasses3D(); } catch (e) {}
   for (const c of [baseC, occFC, fillC, grainL, glassC, lensC, tintC, paneC, segIn, upC, recC, darkC, shadowC, maskC, occC, occ2, cshC, cshC2]) { c.width = c.height = 1; }
 }
-let sessGen = 0, homing = false; // bumped for every new customer: an older startSession that is still awaiting must not continue
+let sessGen = 0, homing = false;
+// 다음 고객 (home button) and the idle auto-return share this: photo wiped, camera off, back to the cover
+async function nextCustomer(why = 'home') {
+  if (coverResolve || homing || (rc.busy && why !== 'idle')) return; homing = true; try { await stillIdle(); } finally { homing = false; }
+  idleHide();
+  // browser memory outside the JS heap (WASM model heap, decoder caches) creeps up ~40 MB per customer in long sessions and only
+  // a page load returns it: every RECYCLE customers, start the next one from a fresh page (models come from the SW cache; the
+  // cover shows while they load, so the customer sees the same screen)
+  const n = (+sessionStorage.getItem('pcCust') || 0) + 1, RECYCLE = ULTRA ? 4 : LITE ? 6 : 12;
+  if (n >= RECYCLE && !QP0.has('norecycle')) { sessionStorage.setItem('pcCust', '0'); releaseCamera(); stopLoop(); const u = new URL(location.href); u.searchParams.delete('_u'); location.replace(u.toString()); return; }
+  sessionStorage.setItem('pcCust', String(n));
+  const recoOpen = rc.el && !rc.el.hidden; const p = showCover(); if (recoOpen) rcClose('idle'); await p; startSession();
+} // bumped for every new customer: an older startSession that is still awaiting must not continue
 function showCover() {
-  sessGen++; stopLoop(); releaseCamera();
+  sessGen++; stopLoop(); releaseCamera(); idleHide();
+  Object.assign(rc, { an: null, res: null, combos: [], sel: null, gEst: null, gManual: false }); window.__pc.genderEst = null;
   // fresh session for the next customer: default selections, no photo left on screen
   purgeStillCaches();
-  Object.assign(S, S0, { mode: 'still' }); hairMask = null; lm = null; origHex = null; grainC = null; look = null; lastStillMasks = null;
+  Object.assign(S, S0, { mode: 'still' }, SET.gender !== 'auto' ? { gender: SET.gender } : {}); hairMask = null; lm = null; origHex = null; grainC = null; look = null; lastStillMasks = null;
   rawC.width = rawC.height = 1; outC.width = outC.height = 1; const vx = view.getContext('2d'); vx.clearRect(0, 0, view.width, view.height);
   stage.classList.remove('is-still'); $('placeholder').classList.remove('hide'); $('phText').textContent = '카메라를 준비하는 중…';
   $('cmpAfter').classList.add('on'); $('cmpSplit').classList.remove('on'); stage.classList.remove('split', 'no-live'); // compare UI back to 결과만 (S.compare was reset, the buttons were not)
@@ -1542,18 +1700,13 @@ async function startSession() { // after the cover tap
 }
 let modelsP = null;
 async function boot() {
-  renderTypes(); renderHair(); renderFrames(); renderShapes(); renderStyles(); bindUI(); rcBind();
+  renderTypes(); renderHair(); renderFrames(); renderShapes(); renderStyles(); bindUI(); rcBind(); bindSettings();
+  if (SET.gender !== 'auto') { S.gender = SET.gender; renderStyles(); }
   const params = new URLSearchParams(location.search);
   const skipCover = params.has('nocover') || params.has('photo') || params.has('sample');
   modelsP = loadModels().then(() => { modelsReady = true; coverLoad(''); setStatus(`모델 준비 완료 (${delegate})`); },
     (e) => { console.error(e); modelsFailed = true; coverLoad('AI 모델을 불러오지 못했어요 · 인터넷 연결 확인 후 새로고침'); $('phText').textContent = 'AI 모델을 불러오지 못했어요. 인터넷 연결을 확인하고 새로고침 해주세요.'; setStatus('모델 로딩 실패'); });
-  $('btnHome').onclick = async () => { if (coverResolve || rc.busy || homing) return; homing = true; try { await stillIdle(); } finally { homing = false; }
-    // browser memory outside the JS heap (WASM model heap, decoder caches) creeps up ~40 MB per customer in long sessions and only
-    // a page load returns it: every RECYCLE customers, start the next one from a fresh page (models come from the SW cache; the
-    // cover shows while they load, so the customer sees the same screen)
-    const n = (+sessionStorage.getItem('pcCust') || 0) + 1, RECYCLE = ULTRA ? 4 : LITE ? 6 : 12;
-    if (n >= RECYCLE && !QP0.has('norecycle')) { sessionStorage.setItem('pcCust', '0'); releaseCamera(); stopLoop(); const u = new URL(location.href); u.searchParams.delete('_u'); location.replace(u.toString()); return; }
-    sessionStorage.setItem('pcCust', String(n)); await showCover(); startSession(); }; // ignore double taps / taps mid-analysis
+  $('btnHome').onclick = () => nextCustomer();
   if (skipCover) {
     coverEl.classList.add('hide'); coverEl.hidden = true; document.body.classList.remove('cover-on');
     await modelsP; if (modelsFailed) return;

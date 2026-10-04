@@ -388,6 +388,17 @@ function buildSeg(masks, w, h, prev, lmP) {
       const IA2 = invAffine({ a: aff.a / segScaleX, b: aff.b / segScaleY, c: aff.c / segScaleX, d: aff.d / segScaleY, e: aff.e / segScaleX, f: aff.f / segScaleY }), h0 = out.hairline;
       for (let i = 0; i < w * h; i++) { const hv = hole[i]; if (hv < 0.1 || hv >= 1) continue; const x = i % w, y = (i - x) / w, cy = IA2.b * x + IA2.d * y + IA2.f;
         if (cy > h0 - 0.1 && cy < h0 + 0.25) hole[i] = Math.min(1, hv * (1 + 1.4 * clamp(1 - Math.abs(cy - (h0 + 0.07)) / 0.18, 0, 1))); }
+      // wispy grey / dark strand tips just below the segmented hair get no hole at all (low segmenter confidence) and stayed as a dark
+      // smudge between the new hairline and the brows: grow the hole a few px onto pixels that don't look like skin, in that band only
+      { let Ls = []; for (let i = 0; i < w * h; i += 3) if ((faceOnly ? faceOnly[i] : 1) && hole[i] < 0.02) { const j = i * 4; Ls.push(0.299 * px[j] + 0.587 * px[j + 1] + 0.114 * px[j + 2]); }
+        Ls.sort((p, q) => p - q); const Lr = Ls.length ? Ls[Math.floor(Ls.length * 0.6)] : 0; Ls = null;
+        const rd = Math.max(1, Math.round(w / 90)), T = new Float32Array(w * h), D = new Float32Array(w * h);
+        for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { let m = 0; for (let k = -rd; k <= rd; k++) { const xx = x + k; if (xx >= 0 && xx < w) m = Math.max(m, hole[y * w + xx]); } T[y * w + x] = m; }
+        for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { let m = 0; for (let k = -rd; k <= rd; k++) { const yy = y + k; if (yy >= 0 && yy < h) m = Math.max(m, T[yy * w + x]); } D[y * w + x] = m; }
+        if (Lr > 0) for (let i = 0; i < w * h; i++) { if (D[i] <= hole[i]) continue; const x = i % w, y = (i - x) / w, cy = IA2.b * x + IA2.d * y + IA2.f, cx = IA2.a * x + IA2.c * y + IA2.e;
+          if (cy < h0 - 0.12 || cy > Math.min(h0 + 0.2, -0.66) || Math.abs(cx) > 0.8) continue; const j = i * 4, L = 0.299 * px[j] + 0.587 * px[j + 1] + 0.114 * px[j + 2];
+          const ns = Math.max(clamp((0.86 * Lr - L) / (0.18 * Lr), 0, 1), clamp((0.08 * L - (px[j] - px[j + 2])) / (0.06 * L + 1), 0, 1)); // darker than skin, or grey
+          if (ns > 0) hole[i] = Math.max(hole[i], D[i] * ns); } }
     }
     if (aff) { // per-column lower edge of the synthesized (hole) area across the forehead: the new hair must reach it (no fill band)
       const hp = new Float32Array(13).fill(NaN);
@@ -397,11 +408,16 @@ function buildSeg(masks, w, h, prev, lmP) {
       if (prev && prev.holeProf) for (let q = 0; q < 13; q++) if (hp[q] === hp[q] && prev.holeProf[q] === prev.holeProf[q] && Math.abs(hp[q] - prev.holeProf[q]) < 0.2) hp[q] = prev.holeProf[q] * 0.5 + hp[q] * 0.5;
       out.holeProf = hp;
       // colour of the real skin just BELOW the synthesized area (what the fill must continue seamlessly; the mid-forehead average is lighter)
+      // skin-likeness: a reference luminance from the mid face, then reject pixels that are much darker or grey (thin grey/dark hair
+      // remnants the segmenter missed near the customer's hairline used to drag the reference down -> dark bands / blocks in the fill)
+      let Lref = 0; { const ls = []; for (let i = 0; i < w * h; i += 3) if (knownSkin[i] && hole[i] <= 0.02) { const j = i * 4; ls.push(0.299 * px[j] + 0.587 * px[j + 1] + 0.114 * px[j + 2]); }
+        ls.sort((p, q) => p - q); Lref = ls.length ? ls[Math.floor(ls.length * 0.6)] : 0; }
+      const skinLike = (j) => { const L = 0.299 * px[j] + 0.587 * px[j + 1] + 0.114 * px[j + 2]; return L > 0.72 * Lref && px[j] - px[j + 2] > 0.06 * L; };
       let r = 0, g = 0, b = 0, n = 0;
       for (let q = 0; q < 13; q++) { if (hp[q] !== hp[q]) continue; const cx = -0.72 + q * 0.12;
         for (let cy = hp[q] + 0.03; cy < hp[q] + 0.12; cy += 0.01) for (const dx of [-0.04, 0, 0.04]) {
           const X = Math.round((aff.a * (cx + dx) + aff.c * cy + aff.e) / segScaleX), Y = Math.round((aff.b * (cx + dx) + aff.d * cy + aff.f) / segScaleY);
-          if (X < 0 || Y < 0 || X >= w || Y >= h) continue; const i = Y * w + X; if (hole[i] > 0.02 || !knownSkin[i]) continue; const j = i * 4; r += px[j]; g += px[j + 1]; b += px[j + 2]; n++; } }
+          if (X < 0 || Y < 0 || X >= w || Y >= h) continue; const i = Y * w + X; if (hole[i] > 0.02 || !knownSkin[i]) continue; const j = i * 4; if (!skinLike(j)) continue; r += px[j]; g += px[j + 1]; b += px[j + 2]; n++; } }
       out.edgeRGB = n > 15 ? [r / n, g / n, b / n] : null;
       // per-height reference: mean real forehead skin per 0.02 band of cy (rows with none take the nearest band BELOW), so the fill
       // continues the forehead's own vertical shading and matches the real skin next to it at the same height
@@ -410,9 +426,13 @@ function buildSeg(masks, w, h, prev, lmP) {
       // not be what the temples are filled with
       const NB = 50, acc = new Float32Array(3 * NB * 4), zoneOf = (cx) => (cx < -0.28 ? 0 : cx > 0.28 ? 2 : 1);
       for (let i = 0; i < w * h; i++) { if (!knownSkin[i] || hole[i] > 0.02) continue; const x = i % w, y = (i - x) / w, cx = IA3.a * x + IA3.c * y + IA3.e, cy = IA3.b * x + IA3.d * y + IA3.f;
-        if (Math.abs(cx) > 0.85 || cy < -1.6 || cy >= -0.6) continue; const k = (zoneOf(cx) * NB + Math.floor((cy + 1.6) / 0.02)) * 4, j = i * 4; acc[k] += px[j]; acc[k + 1] += px[j + 1]; acc[k + 2] += px[j + 2]; acc[k + 3]++; }
+        if (Math.abs(cx) > 0.85 || cy < -1.6 || cy >= -0.6) continue; const k = (zoneOf(cx) * NB + Math.floor((cy + 1.6) / 0.02)) * 4, j = i * 4; if (!skinLike(j)) continue; acc[k] += px[j]; acc[k + 1] += px[j + 1]; acc[k + 2] += px[j + 2]; acc[k + 3]++; }
+      // count-weighted smoothing over +-4 bands (single noisy bands showed as horizontal steps), then rows with too few samples take
+      // the nearest smoothed band below
       const rows = [0, 1, 2].map((z) => { const r = new Array(NB).fill(null); let last = null;
-        for (let k = NB - 1; k >= 0; k--) { const q = (z * NB + k) * 4; if (acc[q + 3] >= 5) last = [acc[q] / acc[q + 3], acc[q + 1] / acc[q + 3], acc[q + 2] / acc[q + 3]]; r[k] = last; } return r; });
+        for (let k = NB - 1; k >= 0; k--) { let sr = 0, sg = 0, sb = 0, sn = 0, own = acc[(z * NB + k) * 4 + 3];
+          for (let d = -4; d <= 4; d++) { const kk = k + d; if (kk < 0 || kk >= NB) continue; const q = (z * NB + kk) * 4, wgt = 1 - Math.abs(d) / 5; sr += acc[q] * wgt; sg += acc[q + 1] * wgt; sb += acc[q + 2] * wgt; sn += acc[q + 3] * wgt; }
+          if (own >= 4 && sn >= 20) last = [sr / sn, sg / sn, sb / sn]; r[k] = last; } return r; });
       for (const z of [0, 2]) for (let k = 0; k < NB; k++) if (!rows[z][k]) rows[z][k] = rows[1][k];
       out.rowRGB = rows[1].some(Boolean) ? rows : null; out.zoneOf = zoneOf;
     }
@@ -458,7 +478,7 @@ function buildSeg(masks, w, h, prev, lmP) {
         const x = i % w, y = (i - x) / w, cy = IA.b * x + IA.d * y + IA.f, t = clamp((-0.95 - cy) / 0.25, 0, 1);
         // continuous across the oval boundary (the old jump 0.6 -> 0.34 showed as blocky lighter patches at the temples)
         const k2 = (faceOnly[i] ? 0.8 * clamp((-0.4 - cy) / 0.3, 0, 1) : 0.8 + 0.15 * t) * clamp((hb[i] - 0.4) / 0.5, 0, 1); // continuous with the local real skin at the fill boundary
-        const rr0 = out.rowRGB && (() => { const cx = IA.a * x + IA.c * y + IA.e, k = clamp(Math.floor((cy + 1.6) / 0.02), 0, 49), z = out.zoneOf(cx), a = out.rowRGB[z][k], c = out.rowRGB[1][k]; if (!a || !c || z === 1) return a || c; const t = clamp((Math.abs(cx) - 0.18) / 0.25, 0, 1); return [c[0] + (a[0] - c[0]) * t, c[1] + (a[1] - c[1]) * t, c[2] + (a[2] - c[2]) * t]; })(), ref = rr0 ? [0.7 * rr0[0] + 0.3 * fhRGB[0], 0.7 * rr0[1] + 0.3 * fhRGB[1], 0.7 * rr0[2] + 0.3 * fhRGB[2]] : fhRGB;
+        const rr0 = out.rowRGB && rowRef(out.rowRGB, IA.a * x + IA.c * y + IA.e, cy), ref = rr0 ? [0.7 * rr0[0] + 0.3 * fhRGB[0], 0.7 * rr0[1] + 0.3 * fhRGB[1], 0.7 * rr0[2] + 0.3 * fhRGB[2]] : fhRGB;
         R = R * (1 - k2) + ref[0] * k2; G = G * (1 - k2) + ref[1] * k2; B = B * (1 - k2) + ref[2] * k2;
         { // chroma from the real skin at this height (the pushed-pull fill tends to grey out -> whitish/pale look next to real skin)
           const kc = 0.85 * clamp((hb[i] - 0.15) / 0.5, 0, 1), Lf = 0.299 * R + 0.587 * G + 0.114 * B, Lr = 0.299 * ref[0] + 0.587 * ref[1] + 0.114 * ref[2];
@@ -480,6 +500,14 @@ function buildSeg(masks, w, h, prev, lmP) {
     out.fill = fid;
   }
   return out;
+}
+// reference skin colour at face coords (cx, cy) from the per-band / per-zone table: linear between bands, smooth centre -> side blend
+function rowRef(rows, cx, cy) {
+  const f = clamp((cy + 1.6) / 0.02 - 0.5, 0, 49), k0 = Math.floor(f), k1 = Math.min(49, k0 + 1), u = f - k0;
+  const at = (z) => { const a = rows[z][k0], b = rows[z][k1]; return a && b ? [a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u, a[2] + (b[2] - a[2]) * u] : a || b; };
+  const c = at(1), sd = at(cx < 0 ? 0 : 2); if (!c || !sd) return c || sd;
+  let t = clamp((Math.abs(cx) - 0.1) / 0.45, 0, 1); t = t * t * (3 - 2 * t);
+  return [c[0] + (sd[0] - c[0]) * t, c[1] + (sd[1] - c[1]) * t, c[2] + (sd[2] - c[2]) * t];
 }
 let segScaleX = 1, segScaleY = 1;
 function segInputFrom(src, sw, sh, maxSide) {

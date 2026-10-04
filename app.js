@@ -935,6 +935,7 @@ function scaleP(o, s) {
 function present(target = view, labels = true) {
   const sc = hiScale, W0 = rawC.width, H0 = rawC.height, W = Math.round(W0 * sc), H = Math.round(H0 * sc), split = S.compare === 'split', tw = split ? W * 2 : W;
   if (target.width !== tw || target.height !== H) { target.width = tw; target.height = H; }
+  if (target === view) stage.classList.toggle('tall-src', H > W * 1.05); // phone stage: portrait photos are shown whole (contain)
   const x = target.getContext('2d'); x.imageSmoothingEnabled = true; x.imageSmoothingQuality = 'high';
   let after = outC;
   if (sc === 1 && paneC.width > 1) { paneC.width = paneC.height = 1; }
@@ -1021,16 +1022,35 @@ function liveLoop() {
   }
   setStatus(lm ? '✓ 얼굴 인식 중' : '얼굴을 화면 가운데에 맞춰주세요');
 }
-async function startCamera() {
+// camera requests are serialised (double taps / overlapping goLive calls used to open two streams and lose one, which kept the
+// camera on) and generation-checked (a stream that arrives after the camera was released - home button, tab hidden - is stopped)
+let camGen = 0, camP = null;
+function startCamera() { if (camP) return camP; camP = startCamera0().finally(() => { camP = null; }); return camP; }
+function releaseCamera() { camGen++; grabStop(); if (stream) stream.getTracks().forEach((t) => t.stop()); stream = null; cameraOK = false; video.srcObject = null; }
+function camHealthy() { const t = stream && stream.getVideoTracks()[0]; return !!(cameraOK && t && t.readyState === 'live'); }
+function camErrKo(e) {
+  const n = e && e.name;
+  if (n === 'StaleCamera') return '';
+  if (n === 'NotAllowedError' || n === 'SecurityError' || n === 'PermissionDeniedError') return '카메라 권한이 꺼져 있어요 · 브라우저 설정에서 카메라를 허용해 주세요';
+  if (n === 'NotFoundError' || n === 'OverconstrainedError' || n === 'DevicesNotFoundError') return '카메라를 찾을 수 없어요 · 사진 올리기로 진행해 주세요';
+  if (n === 'NotReadableError' || n === 'TrackStartError' || n === 'AbortError') return '다른 앱이 카메라를 쓰고 있어요 · 그 앱을 닫고 다시 시도해 주세요';
+  if (n === 'NotSupportedError') return '이 브라우저에서는 카메라를 쓸 수 없어요 · 사진 올리기로 진행해 주세요';
+  return (e && e.message && /[가-힣]/.test(e.message)) ? e.message : '카메라를 쓸 수 없어요 · 사진 올리기로 진행해 주세요';
+}
+async function startCamera0() {
   if (!navigator.mediaDevices?.getUserMedia) throw new Error(window.isSecureContext ? '이 브라우저는 카메라를 지원하지 않아요' : 'HTTPS 주소에서만 카메라를 쓸 수 있어요');
-  grabStop(); if (stream) stream.getTracks().forEach((t) => t.stop());
-  crumb('camera');
-  stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: LITE ? { facingMode: S.facing, width: { ideal: 640, max: 960 }, height: { ideal: 480, max: 720 }, frameRate: { ideal: 24, max: 30 } } : { facingMode: S.facing, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } } });
-  video.srcObject = stream; await video.play(); grabStart();
+  grabStop(); if (stream) stream.getTracks().forEach((t) => t.stop()); stream = null; cameraOK = false;
+  crumb('camera'); const my = ++camGen;
+  const s = await navigator.mediaDevices.getUserMedia({ audio: false, video: LITE ? { facingMode: S.facing, width: { ideal: 640, max: 960 }, height: { ideal: 480, max: 720 }, frameRate: { ideal: 24, max: 30 } } : { facingMode: S.facing, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } } });
+  if (my !== camGen) { s.getTracks().forEach((t) => t.stop()); const e = new Error('stale camera request'); e.name = 'StaleCamera'; throw e; }
+  stream = s; const tr = s.getVideoTracks()[0];
+  if (tr) tr.addEventListener('ended', () => { if (stream === s) { cameraOK = false; if (!document.hidden && S.mode === 'live') toast('카메라 연결이 끊겼어요 · 📷 라이브를 눌러 다시 켜 주세요'); } }, { once: true });
+  video.srcObject = stream; await video.play(); if (my !== camGen) { const e = new Error('stale camera request'); e.name = 'StaleCamera'; throw e; } grabStart();
   const st = stream.getVideoTracks()[0].getSettings(); mirror = (st.facingMode || S.facing) !== 'environment'; cameraOK = true;
 }
 async function goLive() {
   if (!face) return;
+  await stillIdle();
   try {
     if (!cameraOK) await startCamera();
     await ensureMode('VIDEO');
@@ -1038,7 +1058,7 @@ async function goLive() {
     stage.classList.remove('is-still', 'no-live'); $('placeholder').classList.add('hide');
     $('btnLive').classList.add('on'); $('btnPhoto').classList.remove('on');
     if (!liveRAF) liveLoop();
-  } catch (e) { console.warn(e); cameraOK = false; toast('카메라를 쓸 수 없어요: ' + (e.message || e.name || e)); showPhotoMode(); }
+  } catch (e) { console.warn(e); if (e && e.name === 'StaleCamera') return; cameraOK = false; toast(camErrKo(e), 4200); showPhotoMode(); }
 }
 function stopLoop() { if (liveRAF) cancelAnimationFrame(liveRAF); liveRAF = 0; }
 
@@ -1074,7 +1094,15 @@ function rebuildStillSeg() { // style toggled on a still: recompute inpaint/neck
   hairMask = buildSeg(lastStillMasks.masks, lastStillMasks.w, lastStillMasks.h, null, lm);
 }
 function renderStill() { if (S.mode !== 'still') return; compose(rawC.width, rawC.height, lm, hairMask); present(); }
-async function loadStillFrom(src, sw, sh, mirrorIt, opt = {}) {
+// one still analysis at a time; 다시 라이브 / 다음 고객 / another photo wait for a running one (bounded) instead of switching the
+// models' running mode or clearing the canvases underneath it
+let stillP = null;
+const stillIdle = () => stillP ? Promise.race([stillP.catch(() => {}), sleep(8000)]) : Promise.resolve();
+async function loadStillFrom(...args) {
+  await stillIdle(); const p = loadStillFrom0(...args); stillP = p;
+  try { return await p; } finally { if (stillP === p) stillP = null; }
+}
+async function loadStillFrom0(src, sw, sh, mirrorIt, opt = {}) {
   stopLoop(); S.mode = 'still'; mirror = mirrorIt; origHex = null; grainC = null; look = null;
   const s = Math.min(1, (opt.cap || (LOWMEM ? 1200 : 1600)) / Math.max(sw, sh));
   rawC.width = Math.round(sw * s); rawC.height = Math.round(sh * s);
@@ -1111,7 +1139,9 @@ function showPhotoMode() {
 
 /* ------------------------------------------------------------------ save / share */
 function buildExport() {
-  const c = mk(); present(c, true);
+  const c = mk(); present(c, true); try { return buildExport0(c); } finally { freeCanvas(c); }
+}
+function buildExport0(c) {
   const W = c.width, H = c.height, fs = Math.max(16, Math.round(W / 42)), bar = Math.round(fs * 2.6);
   const ex = mk(W, H + bar), x = ex.getContext('2d');
   x.drawImage(c, 0, 0); x.fillStyle = '#fdf6f9'; x.fillRect(0, H, W, bar); x.fillStyle = '#3d3346'; x.font = `700 ${fs}px sans-serif`;
@@ -1124,13 +1154,18 @@ function buildExport() {
   const dt = new Date().toLocaleDateString('ko-KR'), dw = x.measureText(dt).width; x.fillText(dt, W - dw - fs, H + bar / 2 + fs * 0.3);
   return ex;
 }
-function exportBlob() { return new Promise((res) => buildExport().toBlob(res, 'image/png')); }
+function exportBlob() { return new Promise((res) => { const ex = buildExport(); ex.toBlob((b) => { freeCanvas(ex); res(b); }, 'image/png'); }); }
+let exporting = false; // double taps on 저장/공유 used to build two full-size exports at once (and download twice)
 async function save() {
+  if (exporting) return; exporting = true; try { await save0(); } catch (e) { console.warn(e); toast('저장하지 못했어요 · 다시 눌러 주세요'); } finally { exporting = false; }
+}
+async function save0() {
   const blob = await exportBlob(), url = URL.createObjectURL(blob), a = document.createElement('a');
   a.href = url; a.download = `personal-color_${S.type}_${Date.now()}.png`; document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 4000); toast('이미지를 저장했어요');
 }
-async function share() {
+async function share() { if (exporting) return; exporting = true; try { await share0(); } finally { exporting = false; } }
+async function share0() {
   const blob = await exportBlob(), file = new File([blob], 'personal-color.png', { type: 'image/png' });
   try { await navigator.share({ files: [file], title: '퍼스널컬러 가상 피팅' }); } catch (e) { if (e.name !== 'AbortError') toast('공유할 수 없어요'); }
 }
@@ -1217,11 +1252,15 @@ function bindUI() {
     el.addEventListener('pointerdown', on); ['pointerup', 'pointerleave', 'pointercancel'].forEach((t) => el.addEventListener(t, off)); el.addEventListener('contextmenu', (e) => e.preventDefault());
   };
   hold($('btnHold')); hold($('btnHold2'));
-  $('cmpAfter').onclick = () => { S.compare = 'after'; $('cmpAfter').classList.add('on'); $('cmpSplit').classList.remove('on'); rerender(); };
-  $('cmpSplit').onclick = () => { S.compare = 'split'; $('cmpSplit').classList.add('on'); $('cmpAfter').classList.remove('on'); rerender(); };
+  $('cmpAfter').onclick = () => { S.compare = 'after'; $('cmpAfter').classList.add('on'); $('cmpSplit').classList.remove('on'); stage.classList.remove('split'); rerender(); };
+  $('cmpSplit').onclick = () => { S.compare = 'split'; $('cmpSplit').classList.add('on'); $('cmpAfter').classList.remove('on'); stage.classList.add('split'); rerender(); };
+  // phone layout: the sticky stage sits right under the (sticky) header, whose height depends on the width
+  { const top = document.querySelector('header.top'), setH = () => document.documentElement.style.setProperty('--hdrH', (top ? top.offsetHeight : 60) + 'px');
+    setH(); if (top && window.ResizeObserver) new ResizeObserver(setH).observe(top); }
+  if (QP0.has('debug')) document.body.classList.add('dbg');
   $('btnCapture').onclick = capture; $('btnRelive').onclick = goLive; $('btnLive').onclick = goLive; $('phCamera').onclick = goLive;
   $('btnPhoto').onclick = showPhotoMode; $('phSample').onclick = loadSample;
-  $('btnFlip').onclick = async () => { S.facing = S.facing === 'user' ? 'environment' : 'user'; cameraOK = false; await goLive(); };
+  $('btnFlip').onclick = async () => { if (camP) return; S.facing = S.facing === 'user' ? 'environment' : 'user'; cameraOK = false; await goLive(); };
   $('fileInput').onchange = (e) => loadFile(e.target.files[0]); $('fileInput2').onchange = (e) => loadFile(e.target.files[0]);
   $('btnSave').onclick = save;
   if (navigator.canShare && navigator.canShare({ files: [new File([''], 'a.png', { type: 'image/png' })] })) { $('btnShare').hidden = false; $('btnShare').onclick = share; }
@@ -1249,8 +1288,7 @@ function rcPreviewLoop() {
 function rcStopPreview() { if (rc.raf) cancelAnimationFrame(rc.raf); rc.raf = 0; }
 // camera + live loop off while analysing (frees the video decoder buffers and the per-frame model work)
 function rcReleaseCamera() {
-  rcStopPreview(); stopLoop();
-  grabStop(); if (stream) stream.getTracks().forEach((t) => t.stop()); stream = null; cameraOK = false; video.srcObject = null;
+  rcStopPreview(); stopLoop(); releaseCamera();
 }
 function rcFreeCanvases() {
   for (const c of $('rcThumbs').querySelectorAll('canvas')) freeCanvas(c);
@@ -1266,7 +1304,7 @@ function recoFlow() { // resolves with 'live' | 'skip'
   if (crashedAt && !rc.noticed) { rc.noticed = true; toast('이전 실행에서 메모리가 부족했어요. 이 기기에서는 가벼운 모드로 진행할게요.', 5000); }
   rc.el.hidden = false; document.body.classList.add('reco-on'); rcShow('rcCap'); rc.gender = S.gender || 'f'; rc.gEst = null; rc.camWanted = cameraOK;
   loadGender().catch((e) => console.warn('gender model', e)); // ~430 KB, cached offline by the SW; loads while the customer poses
-  $('rcShot').disabled = !cameraOK; $('rcHint').textContent = (cameraOK ? '정면을 바라봐 주세요' : '카메라를 쓸 수 없어요 · 사진을 올려 주세요') + (ULTRA ? ' · 가벼운 모드' : '');
+  $('rcShot').disabled = !cameraOK; $('rcHint').textContent = (cameraOK ? '정면을 바라봐 주세요' : (rc.camErr || '카메라를 쓸 수 없어요 · 사진을 올려 주세요')) + (ULTRA ? ' · 가벼운 모드' : ''); rc.camErr = '';
   if (cameraOK) rcPreviewLoop();
   return new Promise((r) => { rc.done = r; });
 }
@@ -1434,6 +1472,24 @@ function rcBind() {
   };
 }
 
+/* ------------------------------------------------------------------ background / foreground */
+// Android keeps (or silently freezes) the camera when the app goes to the background; the frozen track then shows a still frame
+// on return. Release the camera while hidden and bring it back on return to the same screen.
+let hiddenWhile = null;
+document.addEventListener('visibilitychange', () => {
+  const coverOn = !!coverResolve, recoOn = rc.el && !rc.el.hidden, rcCapOn = recoOn && !$('rcCap').hidden;
+  if (document.hidden) {
+    if (rc.busy || coverOn) return; // analysis keeps running (camera already off); the cover has no camera
+    if (S.mode === 'live' && !recoOn && stream) { hiddenWhile = 'live'; stopLoop(); releaseCamera(); }
+    else if (rcCapOn && stream) { hiddenWhile = 'rcCap'; rcReleaseCamera(); }
+    return;
+  }
+  const w = hiddenWhile; hiddenWhile = null;
+  if (w === 'live' && S.mode === 'live' && !coverOn && !recoOn) goLive();
+  else if (w === 'rcCap' && rcCapOn && !rc.busy) rcBackToCapture();
+  else if (!coverOn && !recoOn && S.mode === 'live' && !camHealthy() && !camP) goLive(); // track ended while away
+});
+
 /* ------------------------------------------------------------------ cover (intro) */
 // shown on every launch (in-store: one cover per customer); models load in the background, the camera is only requested after the tap
 const S0 = { ...S };
@@ -1444,16 +1500,17 @@ function purgeStillCaches() { // next customer: drop all decoded / colourised ha
   for (const k in colorCache) { const e = colorCache[k]; if (e) { freeCanvas(e.back); freeCanvas(e.front); freeCanvas(e.under); } delete colorCache[k]; }
   for (const k in photoCache) { const v = photoCache[k]; if (v && v.ready) { freeCanvas(v.st.back); freeCanvas(v.st.front); freeCanvas(v.st.under); freeCanvas(v.st.shade); } delete photoCache[k]; }
   try { purgeGlasses3D(); } catch (e) {}
-  for (const c of [baseC, occFC, fillC, grainL, glassC, lensC, tintC, paneC, segIn]) { c.width = c.height = 1; }
+  for (const c of [baseC, occFC, fillC, grainL, glassC, lensC, tintC, paneC, segIn, upC, recC, darkC, shadowC, maskC, occC, occ2, cshC, cshC2]) { c.width = c.height = 1; }
 }
+let sessGen = 0, homing = false; // bumped for every new customer: an older startSession that is still awaiting must not continue
 function showCover() {
-  stopLoop();
-  grabStop(); if (stream) stream.getTracks().forEach((t) => t.stop()); stream = null; cameraOK = false; video.srcObject = null;
+  sessGen++; stopLoop(); releaseCamera();
   // fresh session for the next customer: default selections, no photo left on screen
   purgeStillCaches();
   Object.assign(S, S0, { mode: 'still' }); hairMask = null; lm = null; origHex = null; grainC = null; look = null; lastStillMasks = null;
   rawC.width = rawC.height = 1; outC.width = outC.height = 1; const vx = view.getContext('2d'); vx.clearRect(0, 0, view.width, view.height);
   stage.classList.remove('is-still'); $('placeholder').classList.remove('hide'); $('phText').textContent = '카메라를 준비하는 중…';
+  $('cmpAfter').classList.add('on'); $('cmpSplit').classList.remove('on'); stage.classList.remove('split', 'no-live'); // compare UI back to 결과만 (S.compare was reset, the buttons were not)
   $('intensity').value = 75; $('intensityVal').textContent = '75%'; $('gSize').value = 100; $('gSizeVal').textContent = '100%'; $('worstToggle').checked = false;
   renderTypes(); renderHair(); renderFrames(); renderShapes(); renderStyles(); setStatus(''); $('fps').textContent = '';
   coverEl.classList.remove('hide'); coverEl.hidden = false; document.body.classList.add('cover-on'); scrollTo(0, 0);
@@ -1468,16 +1525,17 @@ function hideCover() {
 coverEl.addEventListener('click', hideCover);
 coverEl.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); hideCover(); } });
 async function startSession() { // after the cover tap
-  if (modelsFailed) return;
-  if (!modelsReady) { $('placeholder').classList.remove('hide'); $('phText').textContent = '모델을 불러오는 중이에요…'; await modelsP; if (modelsFailed) return; }
+  if (modelsFailed) return; const my = sessGen, stale = () => my !== sessGen;
+  if (!modelsReady) { $('placeholder').classList.remove('hide'); $('phText').textContent = '모델을 불러오는 중이에요…'; await modelsP; if (modelsFailed || stale()) return; }
   if (navigator.mediaDevices?.getUserMedia) {
     $('phText').textContent = '카메라를 켜는 중… (권한을 허용해 주세요)';
     // ask for the camera right away (inside the tap), but start the heavy live loop only once the fade has finished
     const fade = new Promise((r) => setTimeout(r, 720));
-    try { if (!cameraOK) await startCamera(); } catch (e) { console.warn(e); }
-    await fade;
+    try { if (!cameraOK) await startCamera(); } catch (e) { console.warn(e); if (e && e.name !== 'StaleCamera') rc.camErr = camErrKo(e); }
+    await fade; if (stale()) return;
   }
   const how = new URLSearchParams(location.search).has('noreco') || !rc.el || !$('rcShot') ? 'skip' : await recoFlow();
+  if (stale()) return;
   if (cameraOK || rc.camWanted) await goLive(); // the camera was released for the analysis: goLive restarts it
   else if (how === 'live' && lm) { S.mode = 'still'; stage.classList.add('is-still'); $('placeholder').classList.add('hide'); rebuildStillSeg(); renderStill(); showPhotoMode(); }
   else showPhotoMode();
@@ -1489,7 +1547,7 @@ async function boot() {
   const skipCover = params.has('nocover') || params.has('photo') || params.has('sample');
   modelsP = loadModels().then(() => { modelsReady = true; coverLoad(''); setStatus(`모델 준비 완료 (${delegate})`); },
     (e) => { console.error(e); modelsFailed = true; coverLoad('AI 모델을 불러오지 못했어요 · 인터넷 연결 확인 후 새로고침'); $('phText').textContent = 'AI 모델을 불러오지 못했어요. 인터넷 연결을 확인하고 새로고침 해주세요.'; setStatus('모델 로딩 실패'); });
-  $('btnHome').onclick = async () => { await showCover(); startSession(); };
+  $('btnHome').onclick = async () => { if (coverResolve || rc.busy || homing) return; homing = true; try { await stillIdle(); } finally { homing = false; } await showCover(); startSession(); }; // ignore double taps / taps mid-analysis
   if (skipCover) {
     coverEl.classList.add('hide'); coverEl.hidden = true; document.body.classList.remove('cover-on');
     await modelsP; if (modelsFailed) return;

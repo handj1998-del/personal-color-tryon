@@ -66,11 +66,11 @@
 <header class="top">
   <div class="brand"><span class="wordmark">H.O.W</span><div><h1>퍼스널컬러 가상 피팅</h1><p>안경테 · 헤어 컬러 · 헤어스타일 실시간 테스트</p></div></div>
   <div class="top-right">
-    <button id="btnHome" class="home" title="표지로 (다음 고객)" aria-label="표지 화면으로">🏠<span>처음으로</span></button>
+    <button id="btnHome" class="home" title="표지로 · 다음 고객" aria-label="다음 고객 (표지 화면으로)">🏠<span>다음 고객</span></button>
     <button id="btnInstall" class="install" hidden>📲 <span>앱 설치</span></button>
     <div class="modes" role="tablist">
-      <button id="btnLive" class="mode on" role="tab">📷 라이브</button>
-      <button id="btnPhoto" class="mode" role="tab">🖼️ 사진</button>
+      <button id="btnLive" class="mode on" role="tab"><i class="e">📷 </i>라이브</button>
+      <button id="btnPhoto" class="mode" role="tab"><i class="e">🖼️ </i>사진</button>
     </div>
   </div>
 </header>
@@ -106,12 +106,12 @@
       <div class="badge" id="status">준비 중…</div>
       <div class="badge right" id="fps"></div>
       <div class="stage-ctrls">
-        <button class="ctrl" id="btnHold" title="누르고 있으면 원본">👁️ 원본</button>
+        <button class="ctrl" id="btnHold" title="누르고 있는 동안 원본">👁️ 원본</button>
         <button class="shutter" id="btnCapture" title="촬영"><span></span></button>
-        <button class="ctrl" id="btnFlip" title="카메라 전환">🔄 전환</button>
+        <button class="ctrl" id="btnFlip" title="앞/뒤 카메라 전환" aria-label="앞/뒤 카메라 전환">⇄ 전환</button>
       </div>
       <div class="stage-ctrls still" id="stillCtrls">
-        <button class="ctrl" id="btnHold2">👁️ 원본</button>
+        <button class="ctrl" id="btnHold2" title="누르고 있는 동안 원본">👁️ 원본</button>
         <button class="ctrl primary" id="btnRelive">📷 다시 라이브</button>
         <label class="ctrl"><input type="file" id="fileInput" accept="image/*" hidden>🖼️ 다른 사진</label>
       </div>

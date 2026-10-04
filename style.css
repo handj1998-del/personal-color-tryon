@@ -245,3 +245,40 @@ body.cover-on .app-foot,body.reco-on .app-foot{visibility:hidden}
 .rc-gnote{font-size:12.5px;color:#5e5a54}
 .rc-gbar.ask{border-color:#d9a441;background:#fff8e8;box-shadow:0 0 0 3px #f3dfb0}
 .rc-gbar.ask .rc-gnote{color:#8a5a00;font-weight:600}
+
+/* ---------- v20: touch targets, header labels, phone stage ---------- */
+#fps{display:none} body.dbg #fps{display:block}
+.mode .e{font-style:normal}
+@media (max-width:440px){.mode .e{display:none}}
+/* the home button is the consultant's "next customer" action: keep its label visible on phones */
+@media (max-width:600px){.home span{display:inline}.home{padding:0 12px}}
+@media (max-width:359px){.home span{display:none}}
+/* >= 44px tap targets on touch screens (visual size of chips stays close to before) */
+@media (pointer:coarse),(max-width:899px){
+  .mode,.home,.install{min-height:44px}
+  .modes{padding:2px}
+  .ctrl,.pill,.seg button{min-height:44px;display:inline-flex;align-items:center;justify-content:center}
+  .seg{padding:2px}
+  .sub{min-height:44px;padding:6px 14px}
+  .subs.tight .sub{min-height:44px;padding:6px 16px}
+  .switch{min-height:44px;padding:0 4px}
+  .switch input{width:22px;height:22px}
+  .slider-row input{height:44px}
+  .upd-btn{min-height:44px;padding:4px 14px}
+  .app-foot{padding-top:2px}
+  .rc-link{min-height:44px;display:inline-flex;align-items:center}
+  .rc-seg button{min-height:44px}
+  .rc-seg.sm button{min-height:44px;padding:5px 13px}
+  .rc-gbtns button{min-height:44px}
+  .rc-btn{min-height:50px}
+}
+/* phones (portrait): fill the stage with the camera/photo instead of letterboxing a 4:3 frame in a 3:4 box, and keep it in view
+   (sticky under the header) while the consultant scrolls through styles / colours / frames below */
+@media (max-width:899px) and (orientation:portrait){
+  .stage-wrap{display:contents}
+  .stage{position:sticky;top:var(--hdrH,60px);z-index:4;aspect-ratio:auto;height:min(50vh,100vw);box-shadow:0 8px 22px #c7a4b84d}
+  #view{object-fit:cover}
+  .stage.split #view,.stage.tall-src #view{object-fit:contain}
+  .layout{display:flex;flex-direction:column}
+  .actions{margin-top:0}
+}

@@ -1547,7 +1547,13 @@ async function boot() {
   const skipCover = params.has('nocover') || params.has('photo') || params.has('sample');
   modelsP = loadModels().then(() => { modelsReady = true; coverLoad(''); setStatus(`모델 준비 완료 (${delegate})`); },
     (e) => { console.error(e); modelsFailed = true; coverLoad('AI 모델을 불러오지 못했어요 · 인터넷 연결 확인 후 새로고침'); $('phText').textContent = 'AI 모델을 불러오지 못했어요. 인터넷 연결을 확인하고 새로고침 해주세요.'; setStatus('모델 로딩 실패'); });
-  $('btnHome').onclick = async () => { if (coverResolve || rc.busy || homing) return; homing = true; try { await stillIdle(); } finally { homing = false; } await showCover(); startSession(); }; // ignore double taps / taps mid-analysis
+  $('btnHome').onclick = async () => { if (coverResolve || rc.busy || homing) return; homing = true; try { await stillIdle(); } finally { homing = false; }
+    // browser memory outside the JS heap (WASM model heap, decoder caches) creeps up ~40 MB per customer in long sessions and only
+    // a page load returns it: every RECYCLE customers, start the next one from a fresh page (models come from the SW cache; the
+    // cover shows while they load, so the customer sees the same screen)
+    const n = (+sessionStorage.getItem('pcCust') || 0) + 1, RECYCLE = ULTRA ? 4 : LITE ? 6 : 12;
+    if (n >= RECYCLE && !QP0.has('norecycle')) { sessionStorage.setItem('pcCust', '0'); releaseCamera(); stopLoop(); const u = new URL(location.href); u.searchParams.delete('_u'); location.replace(u.toString()); return; }
+    sessionStorage.setItem('pcCust', String(n)); await showCover(); startSession(); }; // ignore double taps / taps mid-analysis
   if (skipCover) {
     coverEl.classList.add('hide'); coverEl.hidden = true; document.body.classList.remove('cover-on');
     await modelsP; if (modelsFailed) return;

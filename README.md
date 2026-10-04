@@ -17,6 +17,9 @@ Static, 100% client-side web app (index.html / style.css / app.js / frames.js / 
 
 See `assets/CREDITS.md` for asset sources and licenses. Everything runs on-device; there is no server/API feature.
 
+## 장시간 사용 (v21)
+- 브라우저 메모리(WASM 모델 힙·디코더 캐시)가 고객당 약 40 MB씩 늘어 페이지를 새로 열어야만 회수됨 → 「다음 고객」을 누를 때 가벼운 모드는 6명(초경량 4명, 일반 12명)마다 표지에서 페이지를 새로 엽니다(모델은 SW 캐시). `?norecycle`로 끌 수 있음.
+
 ## 안정화 · 화면 정리 (v20)
 - 카메라: 요청 직렬화(연타 시 카메라 스트림이 2~3개 열려 남던 문제), 홈/백그라운드 전환 시 늦게 도착한 스트림 정지, 앱이 백그라운드로 가면 카메라를 끄고 돌아오면 다시 켬, 권한 거부·사용 중 오류는 한국어 안내.
 - 다음 고객(🏠) 연타·분석 중 탭 무시, 사진 분석은 한 번에 하나(다시 라이브/다음 고객이 분석 끝을 기다림), 저장/공유 연타 시 1회만, 다음 고객 때 전/후 비교 버튼 상태 초기화, 표지에서 작업용 캔버스 해제.

@@ -1365,6 +1365,7 @@ function bindUI() {
 
 /* ------------------------------------------------------------------ recommendation step (cover -> capture -> analysis -> result -> live) */
 const rc = { el: $('reco'), raf: 0, res: null, an: null, combos: [], cur: 0, sel: null, done: null, gender: 'f', busy: false, camWanted: false, gen: 0, q: Promise.resolve() };
+window.__pc.reco = rc;
 const RC_MAX = ULTRA ? 640 : LITE ? 768 : 1024; // analysis photo size (long side); also what the previews are cropped from
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // let the browser paint (progress text) between heavy steps; setTimeout fallback when rAF is throttled
@@ -1578,7 +1579,10 @@ function saveSet() { try { localStorage.setItem('pcSettings', JSON.stringify(SET
 window.__pc.SET = SET;
 const IDLE_MS = () => QP0.has('idle') ? +QP0.get('idle') * 1000 : SET.idle * 60000, IDLE_CD = QP0.has('idlecd') ? +QP0.get('idlecd') : 10;
 let lastActive = Date.now(), idleCd = 0, idleT = 0;
-const poke = () => { lastActive = Date.now(); if (idleCd) idleHide(); };
+const poke = (e) => { // any touch = still here; taps on the countdown card itself are left to its buttons
+  lastActive = Date.now();
+  if (idleCd && !(e && e.target && e.target.closest && e.target.closest('.idle-card'))) idleHide();
+};
 ['pointerdown', 'keydown', 'wheel', 'touchstart'].forEach((t) => addEventListener(t, poke, { capture: true, passive: true }));
 function idleBlocked() { // never during the share sheet, an analysis, model loading or with the app in the background
   return !!coverResolve || sharing || exporting || rc.busy || homing || document.hidden || !modelsReady || !$('setSheet').hidden;
@@ -1594,6 +1598,7 @@ function idleTick() {
 idleT = setInterval(idleTick, 1000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) lastActive = Date.now(); });
 function bindSettings() {
+  $('idleBox').onclick = (e) => { if (e.target === e.currentTarget) { idleHide(); lastActive = Date.now(); } }; // backdrop = 계속하기
   $('idleGo').onclick = (e) => { e.stopPropagation(); idleHide(); lastActive = Date.now(); };
   $('idleNow').onclick = (e) => { e.stopPropagation(); idleHide(); nextCustomer('idle'); };
   const render = () => {

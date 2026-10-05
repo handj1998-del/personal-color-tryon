@@ -145,7 +145,7 @@ function mixh(h1, h2, t) { const a = hex(h1), b = hex(h2); return '#' + a.map((v
 export function drawGlasses3D(ctx, lensCtx, P, frameId, shapeId, gScale, accentWarm, hideTemples, tintCtx) {
   const key = variantKey(shapeId, frameId); if (!key) return false;
   const res = colorize(key, frameId, accentWarm); if (!res) return false;
-  drawGlasses(ctx, P, frameId, shapeId, gScale * 0.94, accentWarm, hideTemples, true);
+  if (!res.frame) drawGlasses(ctx, P, frameId, shapeId, gScale * 0.9, accentWarm, hideTemples, true);
   const Wc = lensCtx.canvas.width, Hc = lensCtx.canvas.height; lensCtx.setTransform(1, 0, 0, 1, 0, 0); lensCtx.clearRect(0, 0, Wc, Hc);
   if (tintCtx) { tintCtx.setTransform(1, 0, 0, 1, 0, 0); tintCtx.clearRect(0, 0, tintCtx.canvas.width, tintCtx.canvas.height); }
   let L = P.iL, R = P.iR; if (L.x > R.x) [L, R] = [R, L];
@@ -155,7 +155,7 @@ export function drawGlasses3D(ctx, lensCtx, P, frameId, shapeId, gScale, accentW
   const C = { x: L.x + e.x * t, y: L.y + e.y * t };
   const g = gScale * 0.88, u = (d / 2) * g, k = res.k, cx = res.W / 2, cy = res.H / 2;
   const sides = [{ s: (d - t) * g, sx: cx, sw: res.W - cx }, { s: t * g, sx: 0, sw: cx }];
-  const jobs = [[ctx, res.frame, 1], [lensCtx, res.lens, 0.58]]; if (tintCtx && res.tint) jobs.push([tintCtx, res.tint, 0.85]);
+  const jobs = [[ctx, res.frame, 0.92], [lensCtx, res.lens, 0.28]]; if (tintCtx && res.tint) jobs.push([tintCtx, res.tint, 0.85]);
   for (const [target, src, alpha] of jobs) {
     target.imageSmoothingEnabled = true; target.imageSmoothingQuality = 'high'; target.globalAlpha = alpha;
     for (const sd of sides) {

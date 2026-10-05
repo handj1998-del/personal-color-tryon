@@ -979,7 +979,7 @@ function compose(W, H, P, mask) {
     const col = coloredStyle(st), T = templateTransform(HA);
     outX.drawImage(baseC, 0, 0);
     ensure(recC, W, H); recX.setTransform(1, 0, 0, 1, 0, 0); recX.clearRect(0, 0, W, H);
-    if (col.under && !S.dbgNoUnder) { recX.save(); recX.setTransform(...T); recX.filter = st.g === 'm' ? 'brightness(0.82)' : 'brightness(0.75)'; recX.drawImage(col.under, 0, 0, 1080, 1332); recX.restore(); recX.filter = 'none'; }
+    if (col.under && !S.dbgNoUnder && !st.photo) { recX.save(); recX.setTransform(...T); recX.filter = st.g === 'm' ? 'brightness(0.82)' : 'brightness(0.75)'; recX.drawImage(col.under, 0, 0, 1080, 1332); recX.restore(); recX.filter = 'none'; }
     if (!S.dbgNoBack) { recX.save(); recX.setTransform(...T); recX.imageSmoothingEnabled = true; recX.imageSmoothingQuality = 'high'; recX.drawImage(col.back, 0, 0, 1080, 1332); recX.restore(); }
     outX.drawImage(recC, 0, 0);
     // occluder = face oval (+ neck) from the hair-free base image

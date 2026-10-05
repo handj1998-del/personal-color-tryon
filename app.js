@@ -71,7 +71,7 @@ const TYPES = {
 /* ------------------------------------------------------------------ state */
 const S = {
   type: 'spring', sub: 'light', hair: TYPES.spring.hair[0], intensity: 0.75,
-  frame: 'gold', shape: 'round', gScale: 1, hScale: 1, hX: 0, hY: 0, hairManual: true,
+  frame: 'gold', shape: 'round', gScale: 1, hScale: 1, hX: 0, hY: 0, hairManual: true, pickStyle: 'none',
   style: 'none', bang: null, gender: 'f',
   showWorst: false, compare: 'after', holdBefore: false,
   mode: 'live', facing: 'user',
@@ -1465,7 +1465,7 @@ function renderShapes() { $('shapeList').innerHTML = SHAPES.map((s) => `<button 
 function renderStyles() {
   $('genders').innerHTML = [['f', '여성'], ['m', '남성']].map(([k, n]) => `<button class="sub ${S.gender === k ? 'on' : ''}" data-gender="${k}">${n}</button>`).join('');
   const list = STYLES.filter((s) => s.id === 'none' || s.g.includes(S.gender));
-  const customBtn = customStyle ? `<button class="style ${S.style === 'custom' ? 'on' : ''}" data-style="custom"><img src="${customStyle.thumb}" alt=""><span>내 이미지</span></button>` : '';
+  const customBtn = customStyle ? `<button class="style ${S.pickStyle === 'custom' ? 'on' : ''}" data-style="custom"><img src="${customStyle.thumb}" alt=""><span>내 이미지</span></button>` : '';
   $('styleList').innerHTML = customBtn + list.map((s) => `<button class="style ${S.style === s.id ? 'on' : ''}" data-style="${s.id}">${photoEntry(s.id) ? `<img src="assets/hair/thumbs/${s.id}.jpg" alt="" loading="lazy">` : styleIconSVG(s)}<span>${s.n}</span></button>`).join('');
   const st = STYLES.find((s) => s.id === S.style);
   const bangRow = $('bangRow');
@@ -1501,7 +1501,9 @@ function bindUI() {
   $('frameList').addEventListener('click', (ev) => { const b = ev.target.closest('[data-frame]'); if (!b) return; S.frame = b.dataset.frame; if (S.shape === 'none') S.shape = 'round'; renderFrames(); renderShapes(); rerender(); });
   $('shapeList').addEventListener('click', (ev) => { const b = ev.target.closest('[data-shape]'); if (!b) return; S.shape = b.dataset.shape; renderShapes(); rerender(); });
   $('genders').addEventListener('click', (ev) => { const b = ev.target.closest('[data-gender]'); if (!b) return; S.gender = b.dataset.gender; renderStyles(); });
-  $('styleList').addEventListener('click', (ev) => { const b = ev.target.closest('[data-style]'); if (!b) return; if (b.dataset.style === 'custom') { S.style = 'custom'; S.bang = null; renderStyles(); rerender(); return; } selectStyle(b.dataset.style); });
+  $('styleList').addEventListener('click', (ev) => { const b = ev.target.closest('[data-style]'); if (!b) return; S.pickStyle = b.dataset.style; renderStyles(); });
+  $('hairApply').addEventListener('click', () => { if (S.pickStyle === 'custom') { S.style = 'custom'; S.bang = null; renderStyles(); rerender(); return; } selectStyle(S.pickStyle || 'none'); });
+  $('hairClear').addEventListener('click', () => { S.pickStyle = 'none'; selectStyle('none'); });
   $('hairPick').addEventListener('input', (ev) => {
     const c = ev.target.value;
     $('hairPickVal').textContent = c;

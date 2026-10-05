@@ -296,7 +296,7 @@ export function colorize(src, hex, lutFn, opts = {}) {
   x.drawImage(src, 0, 0); const id = x.getImageData(0, 0, c.width, c.height), d = id.data; const lut = lutFn(hex, 112);
   const n = parseInt(hex.slice(1), 16), tl = 0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255);
   const con = tl > 110 ? 0.62 : tl > 70 ? 0.78 : 0.95;
-  const conP = opts.photo ? (tl > 110 ? 0.95 : tl > 70 ? 1.1 : 1.2) : con;   // light colours: less strand contrast (no streaks)
+  const conP = opts.photo ? (tl > 110 ? 0.78 : tl > 70 ? 0.86 : 0.92) : con;   // photo hair: keep shading, drop dyed streaks
   const light = opts.light || 0, expo = opts.expo || 1, sk = opts.skin || [150, 115, 95];
   const CW = c.width, ks = TW / CW; // template px per source px (low-res / quarter-res layers)
   const colF = new Float32Array(CW); for (let u = 0; u < CW; u++) { const xc = Math.max(-1, Math.min(1, (X0 + u * ks / SC) / 1.4)); colF[u] = expo * (1 + light * 0.24 * xc); }
@@ -310,9 +310,37 @@ export function colorize(src, hex, lutFn, opts = {}) {
     const f = colF[p % CW]; r *= f; g *= f; b *= f;
     const w = d[i + 2] / 255;
     if (w > 0.02) { r = r * (1 - w) + sk[0] * 0.8 * f * w; g = g * (1 - w) + sk[1] * 0.78 * f * w; b = b * (1 - w) + sk[2] * 0.78 * f * w; }
+    // sit the dye in the photo's own light: a little skin undertone, no flat poster colour
+    if (opts.photo) { const m = 0.1; r = r * (1 - m) + sk[0] * 0.55 * f * m; g = g * (1 - m) + sk[1] * 0.5 * f * m; b = b * (1 - m) + sk[2] * 0.48 * f * m; }
     d[i] = r; d[i + 1] = g; d[i + 2] = b;
   }
+  if (opts.photo) featherCutout(d, c.width, c.height);
   x.putImageData(id, 0, 0); return c;
+}
+// Soften the cut-out rim of a photo hairstyle so it does not read as a sticker. Interior strands stay sharp.
+function featherCutout(d, W, H) {
+  const A = new Float32Array(W * H), Ar = new Float32Array(W * H), Ag = new Float32Array(W * H), Ab = new Float32Array(W * H);
+  for (let i = 0; i < W * H; i++) { const a = d[i * 4 + 3] / 255; A[i] = a; Ar[i] = d[i * 4] * a; Ag[i] = d[i * 4 + 1] * a; Ab[i] = d[i * 4 + 2] * a; }
+  const bA = new Float32Array(W * H), bR = new Float32Array(W * H), bG = new Float32Array(W * H), bB = new Float32Array(W * H);
+  const rad = 2;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    let sa = 0, sr = 0, sg = 0, sb = 0, n = 0;
+    for (let dy = -rad; dy <= rad; dy++) for (let dx = -rad; dx <= rad; dx++) {
+      const xx = x + dx, yy = y + dy; if (xx < 0 || yy < 0 || xx >= W || yy >= H) continue;
+      const j = yy * W + xx; sa += A[j]; sr += Ar[j]; sg += Ag[j]; sb += Ab[j]; n++;
+    }
+    const j = y * W + x; bA[j] = sa / n; bR[j] = sr / n; bG[j] = sg / n; bB[j] = sb / n;
+  }
+  for (let i = 0; i < W * H; i++) {
+    const a0 = A[i]; if (a0 > 0.82 && bA[i] > 0.9) continue;
+    const ab = Math.min(1, bA[i] * 1.35); if (ab < 0.012 && a0 < 0.012) { d[i * 4 + 3] = 0; continue; }
+    const w = a0 < 0.45 ? 0.72 : 0.38;
+    const a = a0 * (1 - w) + ab * w; if (a < 0.015) { d[i * 4 + 3] = 0; continue; }
+    d[i * 4] = (Ar[i] * (1 - w) + bR[i] * w) / a;
+    d[i * 4 + 1] = (Ag[i] * (1 - w) + bG[i] * w) / a;
+    d[i * 4 + 2] = (Ab[i] * (1 - w) + bB[i] * w) / a;
+    d[i * 4 + 3] = a * 255;
+  }
 }
 // least-squares affine canonical->screen from landmark correspondences
 export function fitAffine(pairs) { // pairs: [[cx,cy,sx,sy,w]]

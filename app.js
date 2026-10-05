@@ -899,7 +899,11 @@ function compose(W, H, P, mask) {
     const col = coloredStyle(st), T = templateTransform(HA);
     outX.drawImage(baseC, 0, 0);
     if (col.under && !S.dbgNoUnder) { outX.save(); outX.setTransform(...T); outX.filter = st.g === 'm' ? (LITE ? 'brightness(0.8)' : 'brightness(0.8) blur(2px)') : 'brightness(0.7)'; outX.drawImage(col.under, 0, 0, 1080, 1332); outX.restore(); }
-    if (!S.dbgNoBack) { outX.save(); outX.setTransform(...T); outX.imageSmoothingQuality = 'high'; outX.drawImage(col.back, 0, 0, 1080, 1332); outX.restore(); }
+    if (!S.dbgNoBack) {
+      outX.save(); outX.setTransform(...T); outX.imageSmoothingEnabled = true; outX.imageSmoothingQuality = 'high';
+      if (st.photo && !LITE) { outX.filter = 'blur(1.4px)'; outX.globalAlpha = 0.42; outX.drawImage(col.back, 0, 0, 1080, 1332); outX.filter = 'none'; outX.globalAlpha = 1; }
+      outX.drawImage(col.back, 0, 0, 1080, 1332); outX.restore();
+    }
     // occluder = face oval (+ neck) from the hair-free base image
     const ow = Math.round(W / 4), oh = Math.round(H / 4);
     ensure(occ2, ow, oh); occ2X.globalCompositeOperation = 'source-over'; occ2X.clearRect(0, 0, ow, oh);
@@ -931,8 +935,8 @@ function compose(W, H, P, mask) {
     occFX.globalCompositeOperation = 'source-over';
     outX.drawImage(occFC, 0, 0);
     if (st.shade && !S.dbgNoShade) { outX.save(); outX.setTransform(...T); outX.globalAlpha = 0.3; outX.imageSmoothingEnabled = true; outX.drawImage(st.shade, 0, 0, 1080, 1332); outX.restore(); }
-    // contact shadow on the face where hair meets it (temples/sides/forehead), not on the chin (procedural styles only; photo hair carries its own shading)
-    if (!st.photo) {
+    // contact shadow on the face where hair meets it (temples/sides/forehead), not on the chin
+    if (true) {
       const sw2 = Math.round(W / 8), sh2 = Math.round(H / 8), kx2 = sw2 / W, ky2 = sh2 / H; ensure(cshC, sw2, sh2);
       cshX.globalCompositeOperation = 'source-over'; cshX.clearRect(0, 0, sw2, sh2);
       const ovalPath = () => { cshX.beginPath(); P.oval.forEach((p, i) => { i ? cshX.lineTo(p.x * kx2, p.y * ky2) : cshX.moveTo(p.x * kx2, p.y * ky2); }); cshX.closePath(); };
@@ -941,7 +945,7 @@ function compose(W, H, P, mask) {
       const gg = cshX.createLinearGradient(P.top.x * kx2, P.top.y * ky2, P.chin.x * kx2, P.chin.y * ky2);
       gg.addColorStop(0, 'rgba(0,0,0,1)'); gg.addColorStop(0.4, 'rgba(0,0,0,0.55)'); gg.addColorStop(0.72, 'rgba(0,0,0,0)');
       cshX.fillStyle = gg; cshX.fillRect(0, 0, sw2, sh2);
-      outX.save(); outX.globalAlpha = st.photo ? 0.12 : 0.18; outX.imageSmoothingEnabled = true; outX.drawImage(cshC, 0, 0, W, H); outX.restore();
+      outX.save(); outX.globalAlpha = st.photo ? 0.2 : 0.18; outX.imageSmoothingEnabled = true; outX.drawImage(cshC, 0, 0, W, H); outX.restore();
     }
     if (col.front && !S.dbgNoFront) {
       // soft drop shadow of bangs / side locks onto the face
@@ -950,7 +954,7 @@ function compose(W, H, P, mask) {
       cshX2.setTransform(...T.map((v, i) => v * (i % 2 === 0 ? sw3 / W : sh3 / H)));
       cshX2.drawImage(col.front, 0, 0, 1080, 1332); cshX2.setTransform(1, 0, 0, 1, 0, 0);
       cshX2.globalCompositeOperation = 'source-in'; cshX2.fillStyle = 'rgb(30,15,10)'; cshX2.fillRect(0, 0, sw3, sh3);
-      outX.save(); outX.globalAlpha = st.photo ? 0.16 : 0.3; outX.drawImage(cshC2, 0, fh * (st.photo ? 0.012 : 0.025), W, H); outX.restore();
+      outX.save(); outX.globalAlpha = st.photo ? 0.22 : 0.28; outX.drawImage(cshC2, 0, fh * (st.photo ? 0.012 : 0.025), W, H); outX.restore();
       outX.save(); outX.setTransform(...T); outX.drawImage(col.front, 0, 0, 1080, 1332); outX.restore();
     }
   } else {

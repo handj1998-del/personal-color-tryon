@@ -972,7 +972,7 @@ function compose(W, H, P, mask) {
       fitT = tgt; stats.hairFit = { tgt: +tgt.toFixed(3), hl: st.hl, k: +k.toFixed(3), sh: +sh.toFixed(3), cov: +cov.toFixed(3) };
     } else if (st.photo && st.hl) {
       // bang styles (리프컷 등) skipped the hairline fit and sat as a pasted bowl. Scale about the forehead and drop onto this skull.
-      const A = P.aff, k = 0.86 * (S.hScale || 1), cy = -1.2, sh = 0.12;
+      const A = P.aff, k = 0.7 * (S.hScale || 1), cy = -1.05, sh = 0.2;
       HA = { a: A.a * k, b: A.b * k, c: A.c * k, d: A.d * k, e: A.e + A.c * ((1 - k) * cy + sh), f: A.f + A.d * ((1 - k) * cy + sh) };
       fitT = st.hl + sh; stats.hairFit = { tgt: fitT, hl: st.hl, k, sh, cov: 0, bang: 1 };
     }

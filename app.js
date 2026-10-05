@@ -760,6 +760,20 @@ function babyHairs(x, cont, TW, sid, male, lumAt) {
 // Cheap (strokes only, no readback) so live mode can follow the customer's forehead each frame.
 
 // Dark scalp cap under the crown so the hair mass sits on the head instead of floating over a skin gap.
+
+// Keep the cutout inside this skull. The source photo's hair is wider than the customer and has a face hole.
+function clipHairToSkull(ctx, P, W, H) {
+  const dx = P.eR.x - P.eL.x, dy = P.eR.y - P.eL.y, ear = Math.hypot(dx, dy) || 1;
+  const cx = (P.eL.x + P.eR.x) / 2, cy = (P.eL.y + P.eR.y) / 2;
+  const nx = -dy / ear, ny = dx / ear;
+  ctx.save();
+  ctx.globalCompositeOperation = 'destination-in';
+  const g = ctx.createRadialGradient(cx + nx * ear * -0.42, cy + ny * ear * -0.42, ear * 0.2, cx + nx * ear * -0.35, cy + ny * ear * -0.35, ear * 0.78);
+  g.addColorStop(0, '#fff'); g.addColorStop(0.72, '#fff'); g.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.ellipse(cx + nx * ear * -0.38, cy + ny * ear * -0.38, ear * 0.7, ear * 0.58, Math.atan2(dy, dx), 0, 7); ctx.fill();
+  ctx.restore();
+}
 function paintCrownSeat(ctx, A, hex) {
   const col = hex || '#3a2a22';
   ctx.save();
@@ -931,23 +945,22 @@ function compose(W, H, P, mask) {
       if (pf && cc) { const df = []; for (let q = 0; q < 13; q++) { if (pf[q] !== pf[q] || cc[q] !== cc[q]) continue; const C = clamp(pf[q] + ad, tgt - 0.05, tgt + 0.12), Ef = -2.0 + (cc[q] + 2.0) * k + sh; df.push(C + 0.015 - Ef); }
         if (df.length >= 4) { df.sort((p, q) => q - p); cov = clamp(df[1], 0, mask.hairline != null && mask.hairline > -0.95 ? 0.04 : 0.12); sh += cov; } } // bangs: the profile measures the fringe, not the hairline
       sh = Math.max(0, sh - 0.03);
-      const ks = st.g === 'm' ? 0.84 : 0.94; // short male cutouts were a size too big for this skull
+      const ks = st.g === 'm' ? 0.76 : 0.9;
       HA = { a: A.a * ks, b: A.b * ks, c: A.c * k * ks, d: A.d * k * ks, e: A.e + A.c * (-2.0 * (1 - k) + sh), f: A.f + A.d * (-2.0 * (1 - k) + sh) };
       fitT = tgt; stats.hairFit = { tgt: +tgt.toFixed(3), hl: st.hl, k: +k.toFixed(3), sh: +sh.toFixed(3), cov: +cov.toFixed(3) };
     } else if (st.photo && st.hl) {
       // bang styles (리프컷 등) skipped the hairline fit and sat as a pasted bowl. Scale about the forehead and drop onto this skull.
-      const A = P.aff, k = 0.88, cy = -1.2, sh = 0.14;
+      const A = P.aff, k = 0.78, cy = -1.2, sh = 0.16;
       HA = { a: A.a * k, b: A.b * k, c: A.c * k, d: A.d * k, e: A.e + A.c * ((1 - k) * cy + sh), f: A.f + A.d * ((1 - k) * cy + sh) };
       fitT = st.hl + sh; stats.hairFit = { tgt: fitT, hl: st.hl, k, sh, cov: 0, bang: 1 };
     }
     const col = coloredStyle(st), T = templateTransform(HA);
     outX.drawImage(baseC, 0, 0);
-    if (st.photo) paintCrownSeat(outX, HA, S.hair && S.hair.c);
-    if (col.under && !S.dbgNoUnder) { outX.save(); outX.setTransform(...T); outX.filter = st.g === 'm' ? (LITE ? 'brightness(0.8)' : 'brightness(0.8) blur(2px)') : 'brightness(0.7)'; outX.drawImage(col.under, 0, 0, 1080, 1332); outX.restore(); }
-    if (!S.dbgNoBack) {
-      outX.save(); outX.setTransform(...T); outX.imageSmoothingEnabled = true; outX.imageSmoothingQuality = 'high';
-      outX.drawImage(col.back, 0, 0, 1080, 1332); outX.restore();
-    }
+    ensure(recC, W, H); recX.setTransform(1, 0, 0, 1, 0, 0); recX.clearRect(0, 0, W, H);
+    if (col.under && !S.dbgNoUnder) { recX.save(); recX.setTransform(...T); recX.filter = st.g === 'm' ? 'brightness(0.82)' : 'brightness(0.75)'; recX.drawImage(col.under, 0, 0, 1080, 1332); recX.restore(); recX.filter = 'none'; }
+    if (!S.dbgNoBack) { recX.save(); recX.setTransform(...T); recX.imageSmoothingEnabled = true; recX.imageSmoothingQuality = 'high'; recX.drawImage(col.back, 0, 0, 1080, 1332); recX.restore(); }
+    if (st.photo) clipHairToSkull(recX, P, W, H);
+    outX.drawImage(recC, 0, 0);
     // occluder = face oval (+ neck) from the hair-free base image
     const ow = Math.round(W / 4), oh = Math.round(H / 4);
     ensure(occ2, ow, oh); occ2X.globalCompositeOperation = 'source-over'; occ2X.clearRect(0, 0, ow, oh);
@@ -1000,7 +1013,10 @@ function compose(W, H, P, mask) {
       cshX2.drawImage(col.front, 0, 0, 1080, 1332); cshX2.setTransform(1, 0, 0, 1, 0, 0);
       cshX2.globalCompositeOperation = 'source-in'; cshX2.fillStyle = 'rgb(30,15,10)'; cshX2.fillRect(0, 0, sw3, sh3);
       outX.save(); outX.globalAlpha = st.photo ? 0.22 : 0.28; outX.drawImage(cshC2, 0, fh * (st.photo ? 0.012 : 0.025), W, H); outX.restore();
-      outX.save(); outX.setTransform(...T); outX.drawImage(col.front, 0, 0, 1080, 1332); outX.restore();
+      recX.setTransform(1, 0, 0, 1, 0, 0); recX.clearRect(0, 0, W, H);
+      recX.save(); recX.setTransform(...T); recX.drawImage(col.front, 0, 0, 1080, 1332); recX.restore();
+      if (st.photo) clipHairToSkull(recX, P, W, H);
+      outX.drawImage(recC, 0, 0);
     }
     if (st.photo && fitT != null && !(stats.hairFit && stats.hairFit.bang)) paintLiveHairline(outX, P, fitT, S.hair && S.hair.c);
   } else {

@@ -880,8 +880,30 @@ function photoStyle(id, bang) {
   img.src = new URL('./assets/hair/' + (LITE ? 'lo/' : '') + file, import.meta.url).href;
   return 'loading';
 }
+let customStyle = null;
+
+function useCustomHair(img) {
+  const TW = LITE ? 540 : 1080, TH = LITE ? 666 : 1332;
+  const c = mk(TW, TH), x = c.getContext('2d', { willReadFrequently: true });
+  const s = Math.min(TW * 0.72 / img.width, TH * 0.42 / img.height);
+  const w = img.width * s, h = img.height * s;
+  x.drawImage(img, (TW - w) / 2, TH * 0.04, w, h);
+  const id = x.getImageData(0, 0, TW, TH), d = id.data;
+  for (let i = 0; i < d.length; i += 4) {
+    if (!d[i + 3]) continue;
+    d[i] = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+    d[i + 1] = 128; d[i + 2] = 0;
+  }
+  x.putImageData(id, 0, 0);
+  const thumb = mk(96, 120); thumb.getContext('2d').drawImage(img, 0, 0, 96, 120);
+  customStyle = { back: c, photo: true, hl: -1.05, g: S.gender === 'm' ? 'm' : 'f', id: 'custom', bang: null, ears: true, thumb: thumb.toDataURL('image/jpeg', 0.7) };
+  S.style = 'custom'; S.bang = null;
+  renderStyles(); rerender();
+  toast('내 헤어 이미지를 적용했어요');
+}
 function currentStyle() {
   if (S.style === 'none') return null;
+  if (S.style === 'custom' && customStyle) return customStyle;
   const ph = photoStyle(S.style, S.bang);
   if (ph === 'loading') return null;
   if (ph) return ph;
@@ -1442,7 +1464,8 @@ function renderShapes() { $('shapeList').innerHTML = SHAPES.map((s) => `<button 
 function renderStyles() {
   $('genders').innerHTML = [['f', '여성'], ['m', '남성']].map(([k, n]) => `<button class="sub ${S.gender === k ? 'on' : ''}" data-gender="${k}">${n}</button>`).join('');
   const list = STYLES.filter((s) => s.id === 'none' || s.g.includes(S.gender));
-  $('styleList').innerHTML = list.map((s) => `<button class="style ${S.style === s.id ? 'on' : ''}" data-style="${s.id}">${photoEntry(s.id) ? `<img src="assets/hair/thumbs/${s.id}.jpg" alt="" loading="lazy">` : styleIconSVG(s)}<span>${s.n}</span></button>`).join('');
+  const customBtn = customStyle ? `<button class="style ${S.style === 'custom' ? 'on' : ''}" data-style="custom"><img src="${customStyle.thumb}" alt=""><span>내 이미지</span></button>` : '';
+  $('styleList').innerHTML = customBtn + list.map((s) => `<button class="style ${S.style === s.id ? 'on' : ''}" data-style="${s.id}">${photoEntry(s.id) ? `<img src="assets/hair/thumbs/${s.id}.jpg" alt="" loading="lazy">` : styleIconSVG(s)}<span>${s.n}</span></button>`).join('');
   const st = STYLES.find((s) => s.id === S.style);
   const bangRow = $('bangRow');
   if (!st || !st.mass) { bangRow.hidden = true; return; }
@@ -1477,7 +1500,20 @@ function bindUI() {
   $('frameList').addEventListener('click', (ev) => { const b = ev.target.closest('[data-frame]'); if (!b) return; S.frame = b.dataset.frame; if (S.shape === 'none') S.shape = 'round'; renderFrames(); renderShapes(); rerender(); });
   $('shapeList').addEventListener('click', (ev) => { const b = ev.target.closest('[data-shape]'); if (!b) return; S.shape = b.dataset.shape; renderShapes(); rerender(); });
   $('genders').addEventListener('click', (ev) => { const b = ev.target.closest('[data-gender]'); if (!b) return; S.gender = b.dataset.gender; renderStyles(); });
-  $('styleList').addEventListener('click', (ev) => { const b = ev.target.closest('[data-style]'); if (b) selectStyle(b.dataset.style); });
+  $('styleList').addEventListener('click', (ev) => { const b = ev.target.closest('[data-style]'); if (!b) return; if (b.dataset.style === 'custom') { S.style = 'custom'; S.bang = null; renderStyles(); rerender(); return; } selectStyle(b.dataset.style); });
+  $('hairPick').addEventListener('input', (ev) => {
+    const c = ev.target.value;
+    $('hairPickVal').textContent = c;
+    S.hair = { n: '직접 선택', c, t: [S.sub] };
+    renderHair(); throttled();
+  });
+  $('hairFile').addEventListener('change', (ev) => {
+    const f = ev.target.files && ev.target.files[0]; if (!f) return;
+    const url = URL.createObjectURL(f), img = new Image();
+    img.onload = () => { URL.revokeObjectURL(url); useCustomHair(img); };
+    img.onerror = () => toast('이미지를 열 수 없어요');
+    img.src = url;
+  });
   $('bangList').addEventListener('click', (ev) => { const b = ev.target.closest('[data-bang]'); if (b) selectStyle(S.style, b.dataset.bang); });
   $('worstToggle').addEventListener('change', (ev) => { S.showWorst = ev.target.checked; renderHair(); renderFrames(); });
   let rq = 0; const throttled = () => { if (!rq) rq = requestAnimationFrame(() => { rq = 0; rerender(); }); };

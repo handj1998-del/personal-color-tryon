@@ -143,12 +143,21 @@
         <input type="range" id="hSize" min="70" max="130" value="100">
         <output id="hSizeVal">100%</output>
       </div>
+      <div class="slider-row">
+        <span>이미지</span>
+        <input type="file" id="hairFile" accept="image/*">
+      </div>
     </div>
 
     <div class="card">
       <div class="card-head"><h2>헤어 컬러</h2>
         <label class="switch"><input type="checkbox" id="worstToggle"><span>워스트 비교</span></label></div>
       <div class="swatches" id="hairList"></div>
+      <div class="slider-row">
+        <span>색상</span>
+        <input type="color" id="hairPick" value="#3a2a22">
+        <output id="hairPickVal">#3a2a22</output>
+      </div>
       <div class="slider-row">
         <span>강도</span>
         <input type="range" id="intensity" min="0" max="100" value="75">

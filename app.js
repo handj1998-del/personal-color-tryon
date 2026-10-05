@@ -933,10 +933,15 @@ function compose(W, H, P, mask) {
       sh = Math.max(0, sh - 0.03); // sit the crown on the skull; a downward shift was leaving a skin gap above the hair
       HA = { a: A.a, b: A.b, c: A.c * k, d: A.d * k, e: A.e + A.c * (-2.0 * (1 - k) + sh), f: A.f + A.d * (-2.0 * (1 - k) + sh) };
       fitT = tgt; stats.hairFit = { tgt: +tgt.toFixed(3), hl: st.hl, k: +k.toFixed(3), sh: +sh.toFixed(3), cov: +cov.toFixed(3) };
+    } else if (st.photo && st.hl) {
+      // bang styles (리프컷 등) skipped the hairline fit and sat as a pasted bowl. Scale about the forehead and drop onto this skull.
+      const A = P.aff, k = 0.88, cy = -1.2, sh = 0.14;
+      HA = { a: A.a * k, b: A.b * k, c: A.c * k, d: A.d * k, e: A.e + A.c * ((1 - k) * cy + sh), f: A.f + A.d * ((1 - k) * cy + sh) };
+      fitT = st.hl + sh; stats.hairFit = { tgt: fitT, hl: st.hl, k, sh, cov: 0, bang: 1 };
     }
     const col = coloredStyle(st), T = templateTransform(HA);
     outX.drawImage(baseC, 0, 0);
-    if (st.photo) paintCrownSeat(outX, HA, S.hair && S.hair.c);
+    if (st.photo && st.hl < -0.9) paintCrownSeat(outX, HA, S.hair && S.hair.c);
     if (col.under && !S.dbgNoUnder) { outX.save(); outX.setTransform(...T); outX.filter = st.g === 'm' ? (LITE ? 'brightness(0.8)' : 'brightness(0.8) blur(2px)') : 'brightness(0.7)'; outX.drawImage(col.under, 0, 0, 1080, 1332); outX.restore(); }
     if (!S.dbgNoBack) {
       outX.save(); outX.setTransform(...T); outX.imageSmoothingEnabled = true; outX.imageSmoothingQuality = 'high';
@@ -996,7 +1001,7 @@ function compose(W, H, P, mask) {
       outX.save(); outX.globalAlpha = st.photo ? 0.22 : 0.28; outX.drawImage(cshC2, 0, fh * (st.photo ? 0.012 : 0.025), W, H); outX.restore();
       outX.save(); outX.setTransform(...T); outX.drawImage(col.front, 0, 0, 1080, 1332); outX.restore();
     }
-    if (st.photo && fitT != null) paintLiveHairline(outX, P, fitT, S.hair && S.hair.c);
+    if (st.photo && fitT != null && !(stats.hairFit && stats.hairFit.bang)) paintLiveHairline(outX, P, fitT, S.hair && S.hair.c);
   } else {
     outX.drawImage(rawC, 0, 0);
     if (S.hair) applyHair(outX, W, H, mask, S.hair.c, S.intensity);

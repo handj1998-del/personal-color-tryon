@@ -755,6 +755,31 @@ function babyHairs(x, cont, TW, sid, male, lumAt) {
   }
 }
 // soft contact shadow just below the hair mass on the forehead (quarter res, drawn after the face occluder)
+
+// Screen-space hairline: a few translucent root gaps plus baby hairs along the fitted line.
+// Cheap (strokes only, no readback) so live mode can follow the customer's forehead each frame.
+function paintLiveHairline(ctx, P, fitT, hex) {
+  if (!P || !P.aff || fitT == null) return;
+  const A = P.aff, col = hex || '#3a2a22';
+  ctx.save();
+  ctx.setTransform(A.a, A.b, A.c, A.d, A.e, A.f);
+  ctx.globalCompositeOperation = 'destination-out';
+  for (let i = 0; i < 26; i++) {
+    const x = -1.02 + (i / 25) * 2.04, n = vnoise(i * 0.85, 11);
+    ctx.globalAlpha = 0.1 + n * 0.16;
+    ctx.beginPath(); ctx.ellipse(x, fitT + 0.004 + n * 0.02, 0.028 + n * 0.018, 0.01, 0, 0, 7); ctx.fill();
+  }
+  ctx.globalCompositeOperation = 'source-over'; ctx.lineCap = 'round'; ctx.strokeStyle = col;
+  for (let q = 0; q < 24; q++) {
+    const x = -0.9 + (q / 23) * 1.8, side = Math.abs(x) > 0.28, n = vnoise(q * 1.3, 17);
+    const len = (side ? 0.045 : 0.026) * (0.65 + n);
+    ctx.globalAlpha = 0.22 + n * 0.28; ctx.lineWidth = side ? 0.006 : 0.004;
+    ctx.beginPath(); ctx.moveTo(x, fitT - 0.008);
+    ctx.quadraticCurveTo(x + Math.sign(x || 1) * len * 0.45, fitT + len * 0.35, x + Math.sign(x || 1) * len * 0.7, fitT + len);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
 function hairShade(bk, fr, TW, TH) {
   const q = TW / 270, sw = 270, sh = 333, A = new Float32Array(sw * sh);
   for (let y = 0; y < sh; y++) for (let x = 0; x < sw; x++) {
@@ -929,7 +954,8 @@ function compose(W, H, P, mask) {
     const fh = Math.hypot(P.chin.x - P.top.x, P.chin.y - P.top.y), ux = (P.chin.x - P.top.x) / fh, uy = (P.chin.y - P.top.y) / fh;
     const g = occ2X.createLinearGradient(P.top.x * kx, P.top.y * ky, (P.top.x + ux * fh * 0.09) * kx, (P.top.y + uy * fh * 0.09) * ky);
     g.addColorStop(0, 'rgba(0,0,0,0.8)'); g.addColorStop(0.45, 'rgba(0,0,0,0.3)'); g.addColorStop(1, 'rgba(0,0,0,0)');
-    if (!st.photo) { occ2X.globalCompositeOperation = 'destination-out'; occ2X.fillStyle = g; occ2X.fillRect(0, 0, ow, oh); occ2X.globalCompositeOperation = 'source-over'; }
+    if (st.photo) { const gp = occ2X.createLinearGradient(P.top.x * kx, P.top.y * ky, (P.top.x + ux * fh * 0.05) * kx, (P.top.y + uy * fh * 0.05) * ky); gp.addColorStop(0, 'rgba(0,0,0,0.45)'); gp.addColorStop(0.55, 'rgba(0,0,0,0.12)'); gp.addColorStop(1, 'rgba(0,0,0,0)'); occ2X.globalCompositeOperation = 'destination-out'; occ2X.fillStyle = gp; occ2X.fillRect(0, 0, ow, oh); occ2X.globalCompositeOperation = 'source-over'; }
+    else { occ2X.globalCompositeOperation = 'destination-out'; occ2X.fillStyle = g; occ2X.fillRect(0, 0, ow, oh); occ2X.globalCompositeOperation = 'source-over'; }
     occFX.globalCompositeOperation = 'source-over'; occFX.clearRect(0, 0, W, H); occFX.drawImage(baseC, 0, 0);
     occFX.globalCompositeOperation = 'destination-in'; occFX.imageSmoothingEnabled = true; occFX.drawImage(occ2, 0, 0, W, H);
     occFX.globalCompositeOperation = 'source-over';
@@ -957,6 +983,7 @@ function compose(W, H, P, mask) {
       outX.save(); outX.globalAlpha = st.photo ? 0.22 : 0.28; outX.drawImage(cshC2, 0, fh * (st.photo ? 0.012 : 0.025), W, H); outX.restore();
       outX.save(); outX.setTransform(...T); outX.drawImage(col.front, 0, 0, 1080, 1332); outX.restore();
     }
+    if (st.photo && fitT != null) paintLiveHairline(outX, P, fitT, S.hair && S.hair.c);
   } else {
     outX.drawImage(rawC, 0, 0);
     if (S.hair) applyHair(outX, W, H, mask, S.hair.c, S.intensity);

@@ -981,7 +981,6 @@ function compose(W, H, P, mask) {
     ensure(recC, W, H); recX.setTransform(1, 0, 0, 1, 0, 0); recX.clearRect(0, 0, W, H);
     if (col.under && !S.dbgNoUnder) { recX.save(); recX.setTransform(...T); recX.filter = st.g === 'm' ? 'brightness(0.82)' : 'brightness(0.75)'; recX.drawImage(col.under, 0, 0, 1080, 1332); recX.restore(); recX.filter = 'none'; }
     if (!S.dbgNoBack) { recX.save(); recX.setTransform(...T); recX.imageSmoothingEnabled = true; recX.imageSmoothingQuality = 'high'; recX.drawImage(col.back, 0, 0, 1080, 1332); recX.restore(); }
-    if (st.photo) clipHairToSkull(recX, P, W, H);
     outX.drawImage(recC, 0, 0);
     // occluder = face oval (+ neck) from the hair-free base image
     const ow = Math.round(W / 4), oh = Math.round(H / 4);
@@ -1037,8 +1036,7 @@ function compose(W, H, P, mask) {
       outX.save(); outX.globalAlpha = st.photo ? 0.22 : 0.28; outX.drawImage(cshC2, 0, fh * (st.photo ? 0.012 : 0.025), W, H); outX.restore();
       recX.setTransform(1, 0, 0, 1, 0, 0); recX.clearRect(0, 0, W, H);
       recX.save(); recX.setTransform(...T); recX.drawImage(col.front, 0, 0, 1080, 1332); recX.restore();
-      if (st.photo) clipHairToSkull(recX, P, W, H);
-      outX.drawImage(recC, 0, 0);
+        outX.drawImage(recC, 0, 0);
     }
     if (st.photo && fitT != null && !(stats.hairFit && stats.hairFit.bang)) paintLiveHairline(outX, P, fitT, S.hair && S.hair.c);
   } else {

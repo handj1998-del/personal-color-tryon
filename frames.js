@@ -135,7 +135,7 @@ export function drawGlasses(ctx, P, frameId, shapeId, gScale, accentWarm, hideTe
   const rim = sh.rim || 'full';
   const isMetalF = F.kind === 'metal';
   const wire = isMetalF || sh.thin || rim === 'rimless';
-  const th = (wire ? 0.046 : 0.092) * (sh.thk || 1);
+  const th = (wire ? 0.036 : 0.072) * (sh.thk || 1);
   const accent = accentWarm ? FRAMES.gold : FRAMES.silver;
   const box = lensBox(sh);
   const toScreen = (sd, x, y) => ({ x: C.x + e.x * x * sd.s * sd.sign + n.x * y * u, y: C.y + e.y * x * sd.s * sd.sign + n.y * y * u });
@@ -154,7 +154,7 @@ export function drawGlasses(ctx, P, frameId, shapeId, gScale, accentWarm, hideTe
       const g = ctx.createLinearGradient(hinge.x, hinge.y, end.x, end.y);
       g.addColorStop(0, base); g.addColorStop(0.75, base); g.addColorStop(1, 'rgba(0,0,0,0)');
       // real temples are slim (wire ~1.2 mm, acetate ~3 mm seen edge-on from the front), with a darker underside
-      const lw = Math.max(1.1, (wire ? 0.03 : 0.052) * u);
+      const lw = Math.max(0.8, (wire ? 0.024 : 0.04) * u);
       ctx.strokeStyle = g; ctx.lineCap = 'round'; ctx.lineWidth = lw;
       ctx.beginPath(); ctx.moveTo(hinge.x, hinge.y); ctx.lineTo(end.x, end.y); ctx.stroke();
       const nx = -(end.y - hinge.y), ny = end.x - hinge.x, nl = Math.hypot(nx, ny) || 1, ox = nx / nl * lw * 0.28, oy = ny / nl * lw * 0.28;

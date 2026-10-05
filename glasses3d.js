@@ -131,7 +131,7 @@ function colorize(key, frameId, accentWarm) {
         o[i * 4 + 3] = ta * 255;
       }
     }
-    if (thick && rim !== 'brow') slimAlpha(o, W, H, Math.max(2, Math.round(PU * (sh.thk > 1.3 ? 0.02 : 0.034))));
+    if (rim !== 'rimless') slimAlpha(o, W, H, Math.max(2, Math.round(PU * (sh.thk > 1.3 ? 0.028 : 0.046))));
   }
   fx.putImageData(out, 0, 0);
   if (tintC) tintC.getContext('2d').putImageData(tintImg, 0, 0);
@@ -153,7 +153,7 @@ export function drawGlasses3D(ctx, lensCtx, P, frameId, shapeId, gScale, accentW
   const e = { x: dx / d, y: dy / d }, n = { x: -e.y, y: e.x };
   const t = Math.min(d * 0.7, Math.max(d * 0.3, (P.B.x - L.x) * e.x + (P.B.y - L.y) * e.y));
   const C = { x: L.x + e.x * t, y: L.y + e.y * t };
-  const g = gScale * 0.88, u = (d / 2) * g, k = res.k, cx = res.W / 2, cy = res.H / 2;
+  const g = gScale * 0.82, u = (d / 2) * g, k = res.k, cx = res.W / 2, cy = res.H / 2;
   const sides = [{ s: (d - t) * g, sx: cx, sw: res.W - cx }, { s: t * g, sx: 0, sw: cx }];
   const jobs = [[ctx, res.frame, 0.92], [lensCtx, res.lens, 0.28]]; if (tintCtx && res.tint) jobs.push([tintCtx, res.tint, 0.85]);
   for (const [target, src, alpha] of jobs) {

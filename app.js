@@ -71,7 +71,7 @@ const TYPES = {
 /* ------------------------------------------------------------------ state */
 const S = {
   type: 'spring', sub: 'light', hair: TYPES.spring.hair[0], intensity: 0.75,
-  frame: 'gold', shape: 'round', gScale: 1,
+  frame: 'gold', shape: 'round', gScale: 1, hScale: 1,
   style: 'none', bang: null, gender: 'f',
   showWorst: false, compare: 'after', holdBefore: false,
   mode: 'live', facing: 'user',
@@ -769,9 +769,9 @@ function clipHairToSkull(ctx, P, W, H) {
   ctx.save();
   ctx.globalCompositeOperation = 'destination-in';
   const g = ctx.createRadialGradient(cx + nx * ear * -0.42, cy + ny * ear * -0.42, ear * 0.2, cx + nx * ear * -0.35, cy + ny * ear * -0.35, ear * 0.78);
-  g.addColorStop(0, '#fff'); g.addColorStop(0.72, '#fff'); g.addColorStop(1, 'rgba(255,255,255,0)');
+  g.addColorStop(0, '#fff'); g.addColorStop(0.55, 'rgba(255,255,255,0.95)'); g.addColorStop(0.82, 'rgba(255,255,255,0.35)'); g.addColorStop(1, 'rgba(255,255,255,0)');
   ctx.fillStyle = g;
-  ctx.beginPath(); ctx.ellipse(cx + nx * ear * -0.38, cy + ny * ear * -0.38, ear * 0.7, ear * 0.58, Math.atan2(dy, dx), 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(cx + nx * ear * -0.42, cy + ny * ear * -0.42, ear * 0.82, ear * 0.66, Math.atan2(dy, dx), 0, 7); ctx.fill();
   ctx.restore();
 }
 function paintCrownSeat(ctx, A, hex) {
@@ -945,12 +945,12 @@ function compose(W, H, P, mask) {
       if (pf && cc) { const df = []; for (let q = 0; q < 13; q++) { if (pf[q] !== pf[q] || cc[q] !== cc[q]) continue; const C = clamp(pf[q] + ad, tgt - 0.05, tgt + 0.12), Ef = -2.0 + (cc[q] + 2.0) * k + sh; df.push(C + 0.015 - Ef); }
         if (df.length >= 4) { df.sort((p, q) => q - p); cov = clamp(df[1], 0, mask.hairline != null && mask.hairline > -0.95 ? 0.04 : 0.12); sh += cov; } } // bangs: the profile measures the fringe, not the hairline
       sh = Math.max(0, sh - 0.03);
-      const ks = st.g === 'm' ? 0.76 : 0.9;
+      const ks = (st.g === 'm' ? 0.82 : 0.94) * (S.hScale || 1);
       HA = { a: A.a * ks, b: A.b * ks, c: A.c * k * ks, d: A.d * k * ks, e: A.e + A.c * (-2.0 * (1 - k) + sh), f: A.f + A.d * (-2.0 * (1 - k) + sh) };
       fitT = tgt; stats.hairFit = { tgt: +tgt.toFixed(3), hl: st.hl, k: +k.toFixed(3), sh: +sh.toFixed(3), cov: +cov.toFixed(3) };
     } else if (st.photo && st.hl) {
       // bang styles (리프컷 등) skipped the hairline fit and sat as a pasted bowl. Scale about the forehead and drop onto this skull.
-      const A = P.aff, k = 0.78, cy = -1.2, sh = 0.16;
+      const A = P.aff, k = 0.86 * (S.hScale || 1), cy = -1.2, sh = 0.12;
       HA = { a: A.a * k, b: A.b * k, c: A.c * k, d: A.d * k, e: A.e + A.c * ((1 - k) * cy + sh), f: A.f + A.d * ((1 - k) * cy + sh) };
       fitT = st.hl + sh; stats.hairFit = { tgt: fitT, hl: st.hl, k, sh, cov: 0, bang: 1 };
     }
@@ -1483,6 +1483,7 @@ function bindUI() {
   let rq = 0; const throttled = () => { if (!rq) rq = requestAnimationFrame(() => { rq = 0; rerender(); }); };
   $('intensity').addEventListener('input', (ev) => { S.intensity = ev.target.value / 100; $('intensityVal').textContent = ev.target.value + '%'; throttled(); });
   $('gSize').addEventListener('input', (ev) => { S.gScale = ev.target.value / 100; $('gSizeVal').textContent = ev.target.value + '%'; throttled(); });
+  $('hSize').addEventListener('input', (ev) => { S.hScale = ev.target.value / 100; $('hSizeVal').textContent = ev.target.value + '%'; throttled(); });
   const hold = (el) => {
     const on = (e) => { e.preventDefault(); S.holdBefore = true; rerender(); }, off = () => { if (S.holdBefore) { S.holdBefore = false; rerender(); } };
     el.addEventListener('pointerdown', on); ['pointerup', 'pointerleave', 'pointercancel'].forEach((t) => el.addEventListener(t, off)); el.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -1814,7 +1815,7 @@ function showCover() {
   rawC.width = rawC.height = 1; outC.width = outC.height = 1; const vx = view.getContext('2d'); vx.clearRect(0, 0, view.width, view.height);
   stage.classList.remove('is-still'); $('placeholder').classList.remove('hide'); $('phText').textContent = '카메라를 준비하는 중…';
   $('cmpAfter').classList.add('on'); $('cmpSplit').classList.remove('on'); stage.classList.remove('split', 'no-live'); // compare UI back to 결과만 (S.compare was reset, the buttons were not)
-  $('intensity').value = 75; $('intensityVal').textContent = '75%'; $('gSize').value = 100; $('gSizeVal').textContent = '100%'; $('worstToggle').checked = false;
+  $('intensity').value = 75; $('intensityVal').textContent = '75%'; $('gSize').value = 100; $('gSizeVal').textContent = '100%'; $('hSize').value = 100; $('hSizeVal').textContent = '100%'; S.hScale = 1; $('worstToggle').checked = false;
   renderTypes(); renderHair(); renderFrames(); renderShapes(); renderStyles(); setStatus(''); $('fps').textContent = '';
   coverEl.classList.remove('hide'); coverEl.hidden = false; document.body.classList.add('cover-on'); scrollTo(0, 0);
   coverLoad(modelsReady ? '' : '준비 중…'); crumb('cover', true);

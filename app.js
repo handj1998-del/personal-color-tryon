@@ -758,6 +758,18 @@ function babyHairs(x, cont, TW, sid, male, lumAt) {
 
 // Screen-space hairline: a few translucent root gaps plus baby hairs along the fitted line.
 // Cheap (strokes only, no readback) so live mode can follow the customer's forehead each frame.
+
+// Dark scalp cap under the crown so the hair mass sits on the head instead of floating over a skin gap.
+function paintCrownSeat(ctx, A, hex) {
+  const col = hex || '#3a2a22';
+  ctx.save();
+  ctx.setTransform(A.a, A.b, A.c, A.d, A.e, A.f);
+  const g = ctx.createRadialGradient(0, -1.55, 0.05, 0, -1.45, 1.15);
+  g.addColorStop(0, col); g.addColorStop(0.62, col); g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.globalAlpha = 0.92; ctx.fillStyle = g;
+  ctx.beginPath(); ctx.ellipse(0, -1.42, 1.05, 0.62, 0, 0, 7); ctx.fill();
+  ctx.restore();
+}
 function paintLiveHairline(ctx, P, fitT, hex) {
   if (!P || !P.aff || fitT == null) return;
   const A = P.aff, col = hex || '#3a2a22';
@@ -918,15 +930,16 @@ function compose(W, H, P, mask) {
       const hpf = mask && mask.holeProf, pf = hpf || (mask && mask.hlProf), cc = st.contC, ad = hpf ? 0.01 : 0.03;
       if (pf && cc) { const df = []; for (let q = 0; q < 13; q++) { if (pf[q] !== pf[q] || cc[q] !== cc[q]) continue; const C = clamp(pf[q] + ad, tgt - 0.05, tgt + 0.12), Ef = -2.0 + (cc[q] + 2.0) * k + sh; df.push(C + 0.015 - Ef); }
         if (df.length >= 4) { df.sort((p, q) => q - p); cov = clamp(df[1], 0, mask.hairline != null && mask.hairline > -0.95 ? 0.04 : 0.12); sh += cov; } } // bangs: the profile measures the fringe, not the hairline
+      sh = Math.max(0, sh - 0.03); // sit the crown on the skull; a downward shift was leaving a skin gap above the hair
       HA = { a: A.a, b: A.b, c: A.c * k, d: A.d * k, e: A.e + A.c * (-2.0 * (1 - k) + sh), f: A.f + A.d * (-2.0 * (1 - k) + sh) };
       fitT = tgt; stats.hairFit = { tgt: +tgt.toFixed(3), hl: st.hl, k: +k.toFixed(3), sh: +sh.toFixed(3), cov: +cov.toFixed(3) };
     }
     const col = coloredStyle(st), T = templateTransform(HA);
     outX.drawImage(baseC, 0, 0);
+    if (st.photo) paintCrownSeat(outX, HA, S.hair && S.hair.c);
     if (col.under && !S.dbgNoUnder) { outX.save(); outX.setTransform(...T); outX.filter = st.g === 'm' ? (LITE ? 'brightness(0.8)' : 'brightness(0.8) blur(2px)') : 'brightness(0.7)'; outX.drawImage(col.under, 0, 0, 1080, 1332); outX.restore(); }
     if (!S.dbgNoBack) {
       outX.save(); outX.setTransform(...T); outX.imageSmoothingEnabled = true; outX.imageSmoothingQuality = 'high';
-      if (st.photo && !LITE) { outX.filter = 'blur(1.4px)'; outX.globalAlpha = 0.42; outX.drawImage(col.back, 0, 0, 1080, 1332); outX.filter = 'none'; outX.globalAlpha = 1; }
       outX.drawImage(col.back, 0, 0, 1080, 1332); outX.restore();
     }
     // occluder = face oval (+ neck) from the hair-free base image

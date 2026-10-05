@@ -1501,8 +1501,8 @@ function bindUI() {
   $('frameList').addEventListener('click', (ev) => { const b = ev.target.closest('[data-frame]'); if (!b) return; S.frame = b.dataset.frame; if (S.shape === 'none') S.shape = 'round'; renderFrames(); renderShapes(); rerender(); });
   $('shapeList').addEventListener('click', (ev) => { const b = ev.target.closest('[data-shape]'); if (!b) return; S.shape = b.dataset.shape; renderShapes(); rerender(); });
   $('genders').addEventListener('click', (ev) => { const b = ev.target.closest('[data-gender]'); if (!b) return; S.gender = b.dataset.gender; renderStyles(); });
-  $('styleList').addEventListener('click', (ev) => { const b = ev.target.closest('[data-style]'); if (!b) return; S.pickStyle = b.dataset.style; renderStyles(); });
-  $('hairApply').addEventListener('click', () => { if (S.pickStyle === 'custom') { S.style = 'custom'; S.bang = null; renderStyles(); rerender(); return; } selectStyle(S.pickStyle || 'none'); });
+  $('styleList').addEventListener('click', (ev) => { const b = ev.target.closest('[data-style]'); if (!b) return; S.pickStyle = b.dataset.style; if (b.dataset.style === 'custom') { S.style = 'custom'; S.bang = null; renderStyles(); rerender(); return; } selectStyle(b.dataset.style); });
+  $('hairApply').addEventListener('click', () => { if (!S.pickStyle) return; if (S.pickStyle === 'custom') { S.style = 'custom'; S.bang = null; renderStyles(); rerender(); return; } selectStyle(S.pickStyle); });
   $('hairClear').addEventListener('click', () => { S.pickStyle = 'none'; selectStyle('none'); });
   $('hairPick').addEventListener('input', (ev) => {
     const c = ev.target.value;

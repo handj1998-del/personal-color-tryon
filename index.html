@@ -139,9 +139,23 @@
       <div class="styles" id="styleList"></div>
       <div id="bangRow" hidden><h3>앞머리</h3><div class="subs" id="bangList"></div></div>
       <div class="slider-row">
+        <span>맞춤</span>
+        <label class="switch"><input type="checkbox" id="hairManual" checked><span>수동</span></label>
+      </div>
+      <div class="slider-row">
         <span>크기</span>
-        <input type="range" id="hSize" min="70" max="130" value="100">
+        <input type="range" id="hSize" min="50" max="140" value="100">
         <output id="hSizeVal">100%</output>
+      </div>
+      <div class="slider-row">
+        <span>좌우</span>
+        <input type="range" id="hX" min="-40" max="40" value="0">
+        <output id="hXVal">0</output>
+      </div>
+      <div class="slider-row">
+        <span>상하</span>
+        <input type="range" id="hY" min="-40" max="40" value="0">
+        <output id="hYVal">0</output>
       </div>
       <div class="slider-row">
         <span>이미지</span>

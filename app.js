@@ -71,7 +71,7 @@ const TYPES = {
 /* ------------------------------------------------------------------ state */
 const S = {
   type: 'spring', sub: 'light', hair: TYPES.spring.hair[0], intensity: 0.75,
-  frame: 'gold', shape: 'round', gScale: 1, hScale: 1,
+  frame: 'gold', shape: 'round', gScale: 1, hScale: 1, hX: 0, hY: 0, hairManual: true,
   style: 'none', bang: null, gender: 'f',
   showWorst: false, compare: 'after', holdBefore: false,
   mode: 'live', facing: 'user',
@@ -957,7 +957,11 @@ function compose(W, H, P, mask) {
       }
     }
     let HA = P.aff, fitT = null;
-    if (st.photo && st.hl && st.hl < -0.9) { // fit the template's hairline onto the customer's natural hairline (scale about the crown)
+    if (st.photo && S.hairManual) {
+      const A = P.aff, k = S.hScale || 1, ox = S.hX || 0, oy = S.hY || 0;
+      HA = { a: A.a * k, b: A.b * k, c: A.c * k, d: A.d * k, e: A.e + A.a * ox + A.c * oy, f: A.f + A.b * ox + A.d * oy };
+      stats.hairFit = { manual: 1, k, ox, oy };
+    } else if (st.photo && st.hl && st.hl < -0.9) { // fit the template's hairline onto the customer's natural hairline (scale about the crown)
       const tgt = naturalHairline(P, mask);
       // scale about the crown (k <= 1.35 keeps proportions), then shift the rest so the hairline always reaches the forehead line
       const k = clamp((tgt + 2.0) / (st.hl + 2.0), 1, 1.35), A = P.aff; let sh = clamp(tgt - (-2.0 + (st.hl + 2.0) * k), 0, 0.15), cov = 0;
@@ -1517,6 +1521,9 @@ function bindUI() {
   $('intensity').addEventListener('input', (ev) => { S.intensity = ev.target.value / 100; $('intensityVal').textContent = ev.target.value + '%'; throttled(); });
   $('gSize').addEventListener('input', (ev) => { S.gScale = ev.target.value / 100; $('gSizeVal').textContent = ev.target.value + '%'; throttled(); });
   $('hSize').addEventListener('input', (ev) => { S.hScale = ev.target.value / 100; $('hSizeVal').textContent = ev.target.value + '%'; throttled(); });
+  $('hX').addEventListener('input', (ev) => { S.hX = ev.target.value / 100; $('hXVal').textContent = ev.target.value; throttled(); });
+  $('hY').addEventListener('input', (ev) => { S.hY = ev.target.value / 100; $('hYVal').textContent = ev.target.value; throttled(); });
+  $('hairManual').addEventListener('change', (ev) => { S.hairManual = ev.target.checked; throttled(); });
   const hold = (el) => {
     const on = (e) => { e.preventDefault(); S.holdBefore = true; rerender(); }, off = () => { if (S.holdBefore) { S.holdBefore = false; rerender(); } };
     el.addEventListener('pointerdown', on); ['pointerup', 'pointerleave', 'pointercancel'].forEach((t) => el.addEventListener(t, off)); el.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -1848,7 +1855,7 @@ function showCover() {
   rawC.width = rawC.height = 1; outC.width = outC.height = 1; const vx = view.getContext('2d'); vx.clearRect(0, 0, view.width, view.height);
   stage.classList.remove('is-still'); $('placeholder').classList.remove('hide'); $('phText').textContent = '카메라를 준비하는 중…';
   $('cmpAfter').classList.add('on'); $('cmpSplit').classList.remove('on'); stage.classList.remove('split', 'no-live'); // compare UI back to 결과만 (S.compare was reset, the buttons were not)
-  $('intensity').value = 75; $('intensityVal').textContent = '75%'; $('gSize').value = 100; $('gSizeVal').textContent = '100%'; $('hSize').value = 100; $('hSizeVal').textContent = '100%'; S.hScale = 1; $('worstToggle').checked = false;
+  $('intensity').value = 75; $('intensityVal').textContent = '75%'; $('gSize').value = 100; $('gSizeVal').textContent = '100%'; $('hSize').value = 100; $('hSizeVal').textContent = '100%'; S.hScale = 1; S.hX = 0; S.hY = 0; $('hX').value = 0; $('hXVal').textContent = '0'; $('hY').value = 0; $('hYVal').textContent = '0'; $('worstToggle').checked = false;
   renderTypes(); renderHair(); renderFrames(); renderShapes(); renderStyles(); setStatus(''); $('fps').textContent = '';
   coverEl.classList.remove('hide'); coverEl.hidden = false; document.body.classList.add('cover-on'); scrollTo(0, 0);
   coverLoad(modelsReady ? '' : '준비 중…'); crumb('cover', true);

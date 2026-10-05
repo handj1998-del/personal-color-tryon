@@ -966,8 +966,8 @@ function compose(W, H, P, mask) {
       const hpf = mask && mask.holeProf, pf = hpf || (mask && mask.hlProf), cc = st.contC, ad = hpf ? 0.01 : 0.03;
       if (pf && cc) { const df = []; for (let q = 0; q < 13; q++) { if (pf[q] !== pf[q] || cc[q] !== cc[q]) continue; const C = clamp(pf[q] + ad, tgt - 0.05, tgt + 0.12), Ef = -2.0 + (cc[q] + 2.0) * k + sh; df.push(C + 0.015 - Ef); }
         if (df.length >= 4) { df.sort((p, q) => q - p); cov = clamp(df[1], 0, mask.hairline != null && mask.hairline > -0.95 ? 0.04 : 0.12); sh += cov; } } // bangs: the profile measures the fringe, not the hairline
-      sh = Math.max(0, sh - 0.03);
-      const ks = (st.g === 'm' ? 0.82 : 0.94) * (S.hScale || 1);
+      sh = Math.max(0, sh + (st.g === 'm' ? 0.08 : 0));
+      const ks = (st.g === 'm' ? 0.68 : 0.88) * (S.hScale || 1);
       HA = { a: A.a * ks, b: A.b * ks, c: A.c * k * ks, d: A.d * k * ks, e: A.e + A.c * (-2.0 * (1 - k) + sh), f: A.f + A.d * (-2.0 * (1 - k) + sh) };
       fitT = tgt; stats.hairFit = { tgt: +tgt.toFixed(3), hl: st.hl, k: +k.toFixed(3), sh: +sh.toFixed(3), cov: +cov.toFixed(3) };
     } else if (st.photo && st.hl) {

@@ -939,7 +939,7 @@ function coloredStyle(st) {
 /* ------------------------------------------------------------------ compositing */
 function ensure(c, W, H) { if (c.width !== W || c.height !== H) { c.width = W; c.height = H; } }
 function compose(W, H, P, mask) {
-  ensure(outC, W, H); ensure(glassC, W, H); ensure(lensC, W, H); ensure(tintC, W, H);
+  ensure(outC, W, H); ensure(glassC, W, H); ensure(lensC, W, H); ensure(tintC, W, H); glassX.setTransform(1,0,0,1,0,0); glassX.clearRect(0,0,W,H); lensX.setTransform(1,0,0,1,0,0); lensX.clearRect(0,0,W,H); tintX.setTransform(1,0,0,1,0,0); tintX.clearRect(0,0,W,H);
   const t0 = performance.now();
   const st = P && P.aff ? currentStyle() : null;
   if (st) {
@@ -1013,7 +1013,7 @@ function compose(W, H, P, mask) {
     occFX.globalCompositeOperation = 'destination-in'; occFX.imageSmoothingEnabled = true; occFX.drawImage(occ2, 0, 0, W, H);
     occFX.globalCompositeOperation = 'source-over';
     outX.drawImage(occFC, 0, 0);
-    if (st.shade && !S.dbgNoShade) { outX.save(); outX.setTransform(...T); outX.globalAlpha = 0.3; outX.imageSmoothingEnabled = true; outX.drawImage(st.shade, 0, 0, 1080, 1332); outX.restore(); }
+    if (st.shade && !S.dbgNoShade && !st.photo) { outX.save(); outX.setTransform(...T); outX.globalAlpha = 0.3; outX.imageSmoothingEnabled = true; outX.drawImage(st.shade, 0, 0, 1080, 1332); outX.restore(); }
     // contact shadow on the face where hair meets it (temples/sides/forehead), not on the chin
     if (true) {
       const sw2 = Math.round(W / 8), sh2 = Math.round(H / 8), kx2 = sw2 / W, ky2 = sh2 / H; ensure(cshC, sw2, sh2);
@@ -1024,7 +1024,7 @@ function compose(W, H, P, mask) {
       const gg = cshX.createLinearGradient(P.top.x * kx2, P.top.y * ky2, P.chin.x * kx2, P.chin.y * ky2);
       gg.addColorStop(0, 'rgba(0,0,0,1)'); gg.addColorStop(0.4, 'rgba(0,0,0,0.55)'); gg.addColorStop(0.72, 'rgba(0,0,0,0)');
       cshX.fillStyle = gg; cshX.fillRect(0, 0, sw2, sh2);
-      outX.save(); outX.globalAlpha = st.photo ? 0.2 : 0.18; outX.imageSmoothingEnabled = true; outX.drawImage(cshC, 0, 0, W, H); outX.restore();
+      if (!st.photo) { outX.save(); outX.globalAlpha = 0.18; outX.imageSmoothingEnabled = true; outX.drawImage(cshC, 0, 0, W, H); outX.restore(); }
     }
     if (col.front && !S.dbgNoFront) {
       // soft drop shadow of bangs / side locks onto the face
@@ -1033,7 +1033,7 @@ function compose(W, H, P, mask) {
       cshX2.setTransform(...T.map((v, i) => v * (i % 2 === 0 ? sw3 / W : sh3 / H)));
       cshX2.drawImage(col.front, 0, 0, 1080, 1332); cshX2.setTransform(1, 0, 0, 1, 0, 0);
       cshX2.globalCompositeOperation = 'source-in'; cshX2.fillStyle = 'rgb(30,15,10)'; cshX2.fillRect(0, 0, sw3, sh3);
-      outX.save(); outX.globalAlpha = st.photo ? 0.22 : 0.28; outX.drawImage(cshC2, 0, fh * (st.photo ? 0.012 : 0.025), W, H); outX.restore();
+      if (!st.photo) { outX.save(); outX.globalAlpha = 0.28; outX.drawImage(cshC2, 0, fh * 0.025, W, H); outX.restore(); }
       recX.setTransform(1, 0, 0, 1, 0, 0); recX.clearRect(0, 0, W, H);
       recX.save(); recX.setTransform(...T); recX.drawImage(col.front, 0, 0, 1080, 1332); recX.restore();
         outX.drawImage(recC, 0, 0);
@@ -1049,7 +1049,7 @@ function compose(W, H, P, mask) {
   stats.glassMs = stats.glassMs * 0.9 + (performance.now() - t1) * 0.1;
 }
 function glassesPass(outX, W, H, P) {
-  ensure(glassC, W, H); ensure(lensC, W, H); ensure(tintC, W, H);
+  ensure(glassC, W, H); ensure(lensC, W, H); ensure(tintC, W, H); glassX.setTransform(1,0,0,1,0,0); glassX.clearRect(0,0,W,H); lensX.setTransform(1,0,0,1,0,0); lensX.clearRect(0,0,W,H); tintX.setTransform(1,0,0,1,0,0); tintX.clearRect(0,0,W,H);
   if (P && S.shape !== 'none') {
     const sdef = S.style !== 'none' ? STYLES.find((q) => q.id === S.style) : null;
     const hideT = !!(sdef && sdef.g === 'f' && !sdef.ears);
@@ -1063,8 +1063,7 @@ function glassesPass(outX, W, H, P) {
     shadowX.globalCompositeOperation = 'source-in'; shadowX.fillStyle = 'rgb(25,12,12)'; shadowX.fillRect(0, 0, sw, sh);
     outX.save(); outX.imageSmoothingEnabled = true;
     // two-tier contact shadow: tight occlusion right under the rims + wide soft shadow falling on cheeks/nose (light from above)
-    outX.globalAlpha = photo ? 0.16 : 0.12; outX.drawImage(shadowC, 0, 0, sw, sh, -d * 0.02, d * 0.085, W + d * 0.04, H + d * 0.02);
-    outX.globalAlpha = 0.3; outX.drawImage(shadowC, 0, d * 0.03, W, H); outX.restore();
+    outX.globalAlpha = 0.12; outX.drawImage(shadowC, 0, d * 0.02, W, H); outX.restore();
     if (photo) {
       // lens: slight darkening of what is behind, then reflections (screen)
       outX.save(); outX.globalCompositeOperation = 'source-over'; outX.globalAlpha = 0.07;

@@ -1,6 +1,7 @@
 // Photoreal glasses: pre-rendered (Blender, studio HDRI) front-view layers recoloured per frame material.
 // Assets: assets/glasses/{key}_a.png (R=diffuse shade, G=specular, A=alpha), _m.png (metal luminance+alpha),
 // _l.png (lens reflections, premultiplied-ish RGB + coverage). 160 px per local unit, centre (400,208).
+// v24: slim the chunky acetate rims in-browser and soften CGI highlights so frames read as real eyewear.
 import { FRAMES, SHAPE_BY_ID, drawGlasses } from './frames.js';
 const BASE = new URL('./assets/glasses/', import.meta.url).href;
 let manifest = null, onReady = null;
@@ -35,9 +36,9 @@ export function variantKey(shapeId, frameId) {
   let k = `${shapeId}_${v}`; if (!manifest.keys[k]) k = `${shapeId}_${v === 'wire' ? 'thick' : 'wire'}`;
   return manifest.keys[k] ? k : null;
 }
-// gradient map: luminance -> lo .. c .. hi .. white
+// gradient map: luminance -> lo .. c .. hi .. soft white (clipped so metal does not blow out to plastic)
 function metalLUT(M) {
-  const lo = hex(M.lo), c = hex(M.c), hi = hex(M.hi), stops = [[0, [lo[0] * 0.2, lo[1] * 0.2, lo[2] * 0.2]], [0.18, [lo[0] * 0.7, lo[1] * 0.7, lo[2] * 0.7]], [0.42, c], [0.72, hi], [0.9, [255, 253, 245]], [1, [255, 255, 255]]];
+  const lo = hex(M.lo), c = hex(M.c), hi = hex(M.hi), stops = [[0, [lo[0] * 0.28, lo[1] * 0.28, lo[2] * 0.28]], [0.22, [lo[0] * 0.72, lo[1] * 0.72, lo[2] * 0.72]], [0.48, c], [0.74, hi], [0.9, [hi[0] * 0.55 + 255 * 0.45, hi[1] * 0.55 + 253 * 0.45, hi[2] * 0.55 + 245 * 0.45]], [1, [hi[0] * 0.25 + 255 * 0.75, hi[1] * 0.25 + 255 * 0.75, hi[2] * 0.25 + 255 * 0.75]]];
   const lut = new Uint8ClampedArray(256 * 3);
   for (let i = 0; i < 256; i++) {
     const t = i / 255; let j = 0; while (j < stops.length - 2 && t > stops[j + 1][0]) j++;
@@ -48,21 +49,15 @@ function metalLUT(M) {
 }
 const tortCache = new Map();
 function tortoiseField(W, H, F) {
-  // layered tortoiseshell: soft amber base mottling + many small elongated dark flecks + a few crisp dark specks
-  // (scaled to the asset resolution; flecks are stretched along the frame like real cut acetate).
-  // No canvas filters: blur() on ~850 shapes made the final getImageData take ~2.5 s and spike memory (and on a GPU canvas
-  // it is hundreds of blur passes + a forced readback). Softness now comes from drawing at low resolution and upscaling.
   const key = W + 'x' + H + F.c + F.spot; if (tortCache.has(key)) return tortCache.get(key);
   const mkc = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
   const q = W / 800, [sr, sg, sb] = hex(F.spot);
   let seed = 11; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
   const ell = (x, px, py, rx, ry, rot) => { x.beginPath(); x.ellipse(px, py, rx, ry, rot, 0, 7); x.fill(); };
-  // base mottling (was blur 4q) at 1/6 resolution
   const k1 = 6, A = mkc(Math.ceil(W / k1), Math.ceil(H / k1)), ax = A.getContext('2d', { willReadFrequently: true });
   ax.fillStyle = F.c; ax.fillRect(0, 0, A.width, A.height); ax.setTransform(1 / k1, 0, 0, 1 / k1, 0, 0);
   for (let i = 0; i < 110; i++) { const px = rnd() * W, py = rnd() * H, r = (14 + rnd() * 26) * q; ax.fillStyle = `rgba(${sr},${sg},${sb},${0.35 + rnd() * 0.35})`; ell(ax, px, py, r * 1.5, r * 0.9, -0.3 + rnd() * 0.6); }
   for (let i = 0; i < 40; i++) { const px = rnd() * W, py = rnd() * H, r = (5 + rnd() * 10) * q; ax.fillStyle = `rgba(214,150,76,${0.12 + rnd() * 0.15})`; ell(ax, px, py, r * 1.4, r, rnd() - 0.5); }
-  // flecks (was blur 1.6q) at 1/2.5 resolution
   const k2 = 2.5, B = mkc(Math.ceil(W / k2), Math.ceil(H / k2)), bx = B.getContext('2d', { willReadFrequently: true }); bx.setTransform(1 / k2, 0, 0, 1 / k2, 0, 0);
   for (let i = 0; i < 700; i++) { const px = rnd() * W, py = rnd() * H, r = (2 + rnd() * rnd() * 9) * q; bx.fillStyle = `rgba(${sr},${sg},${sb},${0.4 + rnd() * 0.45})`; ell(bx, px, py, r * (1.1 + rnd() * 0.7), r * 0.8, rnd() * 3); }
   const c = mkc(W, H), x = c.getContext('2d', { willReadFrequently: true }); x.imageSmoothingEnabled = true; x.imageSmoothingQuality = 'high';
@@ -72,6 +67,23 @@ function tortoiseField(W, H, F) {
   A.width = A.height = B.width = B.height = c.width = c.height = 0;
   tortCache.set(key, d); while (tortCache.size > 2) tortCache.delete(tortCache.keys().next().value);
   return d;
+}
+// Eat the outer shell of a pre-rendered thick rim so acetate reads closer to a real 3–4 mm front.
+function slimAlpha(data, W, H, rad) {
+  if (rad < 1) return;
+  const srcA = new Uint8ClampedArray(W * H);
+  for (let i = 0; i < W * H; i++) srcA[i] = data[i * 4 + 3];
+  const tmp = new Uint8ClampedArray(W * H);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    let m = 255; const y0 = y * W;
+    for (let k = -rad; k <= rad; k++) { const xx = x + k; if (xx < 0 || xx >= W) { m = 0; break; } if (srcA[y0 + xx] < m) m = srcA[y0 + xx]; }
+    tmp[y0 + x] = m;
+  }
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    let m = 255;
+    for (let k = -rad; k <= rad; k++) { const yy = y + k; if (yy < 0 || yy >= H) { m = 0; break; } if (tmp[yy * W + x] < m) m = tmp[yy * W + x]; }
+    data[(y * W + x) * 4 + 3] = m;
+  }
 }
 function colorize(key, frameId, accentWarm) {
   const ck = key + '|' + frameId + '|' + accentWarm; if (colCache.has(ck)) return colCache.get(ck);
@@ -83,47 +95,43 @@ function colorize(key, frameId, accentWarm) {
   const frame = document.createElement('canvas'); frame.width = W; frame.height = H; const fx = frame.getContext('2d');
   const out = fx.createImageData(W, H), o = out.data;
   let tintC = null, tintImg = null;
-  // metal layer
   const isMetal = F.kind === 'metal';
-  const metalOf = (q) => q.kind === 'metal' ? q : { c: q.c, hi: mixh(q.c, '#ffffff', 0.55), lo: mixh(q.c, '#000000', 0.5) };
+  const metalOf = (q) => q.kind === 'metal' ? q : { c: q.c, hi: mixh(q.c, '#ffffff', 0.42), lo: mixh(q.c, '#000000', 0.42) };
   const M = isMetal ? F : thick ? (accentWarm && F.kind !== 'clear' ? FRAMES.gold : FRAMES.silver) : metalOf(F);
   if (im) {
     const d = pixels(im).data, lut = metalLUT(M);
-    for (let i = 0; i < W * H; i++) { const a = d[i * 4 + 3]; if (!a) continue; const l = d[i * 4] * 3; o[i * 4] = lut[l]; o[i * 4 + 1] = lut[l + 1]; o[i * 4 + 2] = lut[l + 2]; o[i * 4 + 3] = a; }
+    for (let i = 0; i < W * H; i++) { const a = d[i * 4 + 3]; if (!a) continue; const l = d[i * 4] * 3; o[i * 4] = lut[l]; o[i * 4 + 1] = lut[l + 1]; o[i * 4 + 2] = lut[l + 2]; o[i * 4 + 3] = Math.min(255, a * 0.92); }
   }
   if (ia) {
     const d = pixels(ia).data;
     const AF = (isMetal && (rim === 'brow' || rim === 'combo')) ? FRAMES.black : isMetal ? FRAMES.black : F;
     const base = hex(AF.c), tort = AF.kind === 'tortoise' ? tortoiseField(W, H, AF) : null, c2 = AF.c2 ? hex(AF.c2) : null;
-    const specK = AF.matte ? 0.25 : AF.kind === 'clear' ? 1.15 : 1;
+    const specK = AF.matte ? 0.12 : AF.kind === 'clear' ? 0.72 : 0.42;
     if (AF.kind === 'clear') { tintC = document.createElement('canvas'); tintC.width = W; tintC.height = H; tintImg = tintC.getContext('2d').createImageData(W, H); }
     const td = tintImg ? tintImg.data : null;
-    // vertical extent of acetate for gradient frames
     const y0 = H * 0.5 - 0.75 * PU, y1 = H * 0.5 + 0.55 * PU;
     for (let y = 0; y < H; y++) {
       const gy = Math.min(1, Math.max(0, (y - y0) / (y1 - y0)));
       for (let x = 0; x < W; x++) {
         const i = y * W + x, a = d[i * 4 + 3]; if (!a) continue;
-        const diff = d[i * 4] / 255 * 1.25, s0 = d[i * 4 + 1] / 255, spec = (AF.kind === 'clear' ? s0 * 255 : Math.pow(s0, 1.7) * 330) * specK; // glossy acetate: dark body, crisp highlights
+        const diff = d[i * 4] / 255 * 1.05, s0 = d[i * 4 + 1] / 255, spec = (AF.kind === 'clear' ? s0 * 150 : Math.pow(s0, 1.85) * 150) * specK;
         let r = base[0], g = base[1], b = base[2], al = a;
         if (tort) { r = tort[i * 4]; g = tort[i * 4 + 1]; b = tort[i * 4 + 2]; }
         if (c2) { const t = Math.max(0, (gy - 0.3) / 0.7); r += (c2[0] - r) * t; g += (c2[1] - g) * t; b += (c2[2] - b) * t; al = a * (1 - 0.45 * t); }
-        let k = Math.min(1.25, diff);
+        let k = Math.min(1.05, 0.72 + diff * 0.28);
         if (AF.kind === 'clear') {
-          // clear acetate: the body tints the skin behind it (separate multiply layer); this layer only carries the
-          // denser rounded edges (Fresnel) and the specular kicks so the frame stays see-through
           const edge = Math.min(1, Math.max(0, 1 - d[i * 4] / 255 * 1.15)), sp = Math.min(1, spec / 140);
-          if (td) { const dens = 0.5 + 0.45 * edge; td[i * 4] = 255 - (255 - r) * dens; td[i * 4 + 1] = 255 - (255 - g) * dens; td[i * 4 + 2] = 255 - (255 - b) * dens; td[i * 4 + 3] = a; }
-          al = a * Math.min(1, 0.08 + 0.42 * edge + 0.7 * sp);
-          r = 255 - (255 - r) * 0.6; g = 255 - (255 - g) * 0.6; b = 255 - (255 - b) * 0.6; k = 0.75 + 0.25 * Math.min(1, diff);
+          if (td) { const dens = 0.42 + 0.4 * edge; td[i * 4] = 255 - (255 - r) * dens; td[i * 4 + 1] = 255 - (255 - g) * dens; td[i * 4 + 2] = 255 - (255 - b) * dens; td[i * 4 + 3] = a; }
+          al = a * Math.min(1, 0.06 + 0.36 * edge + 0.45 * sp);
+          r = 255 - (255 - r) * 0.45; g = 255 - (255 - g) * 0.45; b = 255 - (255 - b) * 0.45; k = 0.8 + 0.2 * Math.min(1, diff);
         }
         const R = r * k + spec, G = g * k + spec, B = b * k + spec;
-        // over existing metal pixel
         const ea = o[i * 4 + 3] / 255, na = al / 255, ta = na + ea * (1 - na);
         o[i * 4] = (R * na + o[i * 4] * ea * (1 - na)) / ta; o[i * 4 + 1] = (G * na + o[i * 4 + 1] * ea * (1 - na)) / ta; o[i * 4 + 2] = (B * na + o[i * 4 + 2] * ea * (1 - na)) / ta;
         o[i * 4 + 3] = ta * 255;
       }
     }
+    if (thick && rim !== 'brow') slimAlpha(o, W, H, Math.max(2, Math.round(PU * (sh.thk > 1.3 ? 0.02 : 0.034))));
   }
   fx.putImageData(out, 0, 0);
   if (tintC) tintC.getContext('2d').putImageData(tintImg, 0, 0);
@@ -134,13 +142,10 @@ function colorize(key, frameId, accentWarm) {
 }
 function mixh(h1, h2, t) { const a = hex(h1), b = hex(h2); return '#' + a.map((v, i) => Math.round(v + (b[i] - v) * t).toString(16).padStart(2, '0')).join(''); }
 
-// Returns false when the photoreal assets are not available yet (caller falls back to the procedural renderer).
-// Draws temples + frame into ctx (cleared); lens reflections go to lensCtx (cleared) to be composited with 'screen'.
-// tintCtx (optional) receives the multiply tint of clear acetate frames; return value is 'tint' when it was drawn.
 export function drawGlasses3D(ctx, lensCtx, P, frameId, shapeId, gScale, accentWarm, hideTemples, tintCtx) {
   const key = variantKey(shapeId, frameId); if (!key) return false;
   const res = colorize(key, frameId, accentWarm); if (!res) return false;
-  drawGlasses(ctx, P, frameId, shapeId, gScale, accentWarm, hideTemples, true); // procedural temples only
+  drawGlasses(ctx, P, frameId, shapeId, gScale * 0.94, accentWarm, hideTemples, true);
   const Wc = lensCtx.canvas.width, Hc = lensCtx.canvas.height; lensCtx.setTransform(1, 0, 0, 1, 0, 0); lensCtx.clearRect(0, 0, Wc, Hc);
   if (tintCtx) { tintCtx.setTransform(1, 0, 0, 1, 0, 0); tintCtx.clearRect(0, 0, tintCtx.canvas.width, tintCtx.canvas.height); }
   let L = P.iL, R = P.iR; if (L.x > R.x) [L, R] = [R, L];
@@ -148,22 +153,19 @@ export function drawGlasses3D(ctx, lensCtx, P, frameId, shapeId, gScale, accentW
   const e = { x: dx / d, y: dy / d }, n = { x: -e.y, y: e.x };
   const t = Math.min(d * 0.7, Math.max(d * 0.3, (P.B.x - L.x) * e.x + (P.B.y - L.y) * e.y));
   const C = { x: L.x + e.x * t, y: L.y + e.y * t };
-  const g = gScale * 0.94, u = (d / 2) * g, k = res.k, cx = res.W / 2, cy = res.H / 2;
+  const g = gScale * 0.88, u = (d / 2) * g, k = res.k, cx = res.W / 2, cy = res.H / 2;
   const sides = [{ s: (d - t) * g, sx: cx, sw: res.W - cx }, { s: t * g, sx: 0, sw: cx }];
-  const jobs = [[ctx, res.frame], [lensCtx, res.lens]]; if (tintCtx && res.tint) jobs.push([tintCtx, res.tint]);
-  for (const [target, src] of jobs) {
-    target.imageSmoothingEnabled = true; target.imageSmoothingQuality = 'high';
+  const jobs = [[ctx, res.frame, 1], [lensCtx, res.lens, 0.58]]; if (tintCtx && res.tint) jobs.push([tintCtx, res.tint, 0.85]);
+  for (const [target, src, alpha] of jobs) {
+    target.imageSmoothingEnabled = true; target.imageSmoothingQuality = 'high'; target.globalAlpha = alpha;
     for (const sd of sides) {
-      // local x = (px - cx)/k ; screen = C + e*x*s + n*y*u  (right half uses s of right side, left half of left side)
       target.setTransform(e.x * sd.s / k, e.y * sd.s / k, n.x * u / k, n.y * u / k, C.x - (e.x * sd.s * cx + n.x * u * cy) / k, C.y - (e.y * sd.s * cx + n.y * u * cy) / k);
       target.drawImage(src, sd.sx, 0, sd.sw, res.H, sd.sx, 0, sd.sw, res.H);
     }
-    target.setTransform(1, 0, 0, 1, 0, 0);
+    target.globalAlpha = 1; target.setTransform(1, 0, 0, 1, 0, 0);
   }
   return tintCtx && res.tint ? 'tint' : true;
 }
-// Resolves once the photoreal layers for this shape/frame are decoded (or failed / unavailable / timed out),
-// so callers can render once instead of re-composing while polling.
 export function preloadGlasses3D(shapeId, frameId, timeout = 4000) {
   const key = variantKey(shapeId, frameId); if (!key) return Promise.resolve(false);
   const info = manifest.keys[key], fns = [info.A && key + '_a.png', info.M && key + '_m.png', key + '_l.png'].filter(Boolean);
@@ -179,8 +181,6 @@ export function preloadGlasses3D(shapeId, frameId, timeout = 4000) {
     chk();
   });
 }
-
-// drop every colourised variant and decoded layer (new customer / memory pressure)
 export function purgeGlasses3D() {
   for (const r0 of colCache.values()) for (const c of [r0.frame, r0.tint, r0.lens]) if (c && c.getContext) c.width = c.height = 0;
   colCache.clear(); tortCache.clear();

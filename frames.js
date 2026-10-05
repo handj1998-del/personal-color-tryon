@@ -135,7 +135,7 @@ export function drawGlasses(ctx, P, frameId, shapeId, gScale, accentWarm, hideTe
   const rim = sh.rim || 'full';
   const isMetalF = F.kind === 'metal';
   const wire = isMetalF || sh.thin || rim === 'rimless';
-  const th = (wire ? 0.068 : 0.15) * (sh.thk || 1);
+  const th = (wire ? 0.046 : 0.092) * (sh.thk || 1);
   const accent = accentWarm ? FRAMES.gold : FRAMES.silver;
   const box = lensBox(sh);
   const toScreen = (sd, x, y) => ({ x: C.x + e.x * x * sd.s * sd.sign + n.x * y * u, y: C.y + e.y * x * sd.s * sd.sign + n.y * y * u });
@@ -154,7 +154,7 @@ export function drawGlasses(ctx, P, frameId, shapeId, gScale, accentWarm, hideTe
       const g = ctx.createLinearGradient(hinge.x, hinge.y, end.x, end.y);
       g.addColorStop(0, base); g.addColorStop(0.75, base); g.addColorStop(1, 'rgba(0,0,0,0)');
       // real temples are slim (wire ~1.2 mm, acetate ~3 mm seen edge-on from the front), with a darker underside
-      const lw = Math.max(1.2, (wire ? 0.042 : 0.085) * u);
+      const lw = Math.max(1.1, (wire ? 0.03 : 0.052) * u);
       ctx.strokeStyle = g; ctx.lineCap = 'round'; ctx.lineWidth = lw;
       ctx.beginPath(); ctx.moveTo(hinge.x, hinge.y); ctx.lineTo(end.x, end.y); ctx.stroke();
       const nx = -(end.y - hinge.y), ny = end.x - hinge.x, nl = Math.hypot(nx, ny) || 1, ox = nx / nl * lw * 0.28, oy = ny / nl * lw * 0.28;
@@ -205,14 +205,14 @@ export function drawGlasses(ctx, P, frameId, shapeId, gScale, accentWarm, hideTe
       ctx.strokeStyle = metalGrad(ctx, M); ctx.lineWidth = 0.045; ctx.stroke(lens);
       const topF = isMetalF ? FRAMES.black : F;
       clipTop(() => {
-        ctx.strokeStyle = paint(ctx, topF, false, box); ctx.lineWidth = rim === 'combo' ? 0.17 : 0.21;
+        ctx.strokeStyle = paint(ctx, topF, false, box); ctx.lineWidth = rim === 'combo' ? 0.11 : 0.13;
         ctx.save(); ctx.translate(0, -0.035); ctx.stroke(lens); ctx.restore();
         if (!topF.matte) { ctx.strokeStyle = 'rgba(255,255,255,0.2)'; ctx.lineWidth = 0.04; ctx.save(); ctx.translate(0, -0.09); ctx.stroke(lens); ctx.restore(); }
       });
     } else if (rim === 'halfrim') {
       ctx.strokeStyle = 'rgba(30,30,30,0.18)'; ctx.lineWidth = 0.022; ctx.stroke(lens);           // nylon thread
       ctx.strokeStyle = 'rgba(255,255,255,0.4)'; ctx.lineWidth = 0.01; ctx.stroke(lens);
-      clipTop(() => { ctx.strokeStyle = paint(ctx, F, isMetalF, box); ctx.lineWidth = isMetalF ? 0.09 : 0.14; ctx.stroke(lens);
+      clipTop(() => { ctx.strokeStyle = paint(ctx, F, isMetalF, box); ctx.lineWidth = isMetalF ? 0.055 : 0.085; ctx.stroke(lens);
         ctx.strokeStyle = isMetalF ? rgba(F.hi, 0.7) : 'rgba(255,255,255,0.2)'; ctx.lineWidth = 0.03; ctx.save(); ctx.translate(0, -0.03); ctx.stroke(lens); ctx.restore(); });
     } else if (rim === 'rimless') {
       ctx.strokeStyle = 'rgba(40,50,60,0.16)'; ctx.lineWidth = 0.035; ctx.stroke(lens);
@@ -243,7 +243,7 @@ export function drawGlasses(ctx, P, frameId, shapeId, gScale, accentWarm, hideTe
 
 export function shapeIconSVG(sh) {
   if (!sh.d) return '<svg viewBox="-230 -100 460 200"><line x1="-120" y1="-60" x2="120" y2="60" stroke="#c9b9c4" stroke-width="10"/></svg>';
-  const s = sh.sc || 1, sw = sh.thin || sh.rim === 'rimless' ? 7 : 13 * (sh.thk || 1);
+  const s = sh.sc || 1, sw = sh.thin || sh.rim === 'rimless' ? 6 : 9 * (sh.thk || 1);
   const dash = sh.rim === 'rimless' ? ' stroke-dasharray="4 6" stroke-opacity=".6"' : '';
   const lens = (m) => `<path d="${sh.d}" transform="${m}translate(108,-4) scale(${s})" stroke-width="${sw / s}"${dash}/>`;
   let extra = '';

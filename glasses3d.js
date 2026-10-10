@@ -1,7 +1,8 @@
 // Photoreal glasses: pre-rendered (Blender, studio HDRI) front-view layers recoloured per frame material.
 // Assets: assets/glasses/{key}_a.png (R=diffuse shade, G=specular, A=alpha), _m.png (metal luminance+alpha),
 // _l.png (lens reflections, premultiplied-ish RGB + coverage). 160 px per local unit, centre (400,208).
-// v24: slim the chunky acetate rims in-browser and soften CGI highlights so frames read as real eyewear.
+// v44: re-rendered at real-world thickness (acetate ~4.7 mm front with a rounded bevel, metal wire ~1.6 mm, key light + studio HDRI),
+// so no in-browser rim erosion any more; stronger diffuse shading, glossy acetate highlights, temples + refraction + shadows in app.js.
 import { FRAMES, SHAPE_BY_ID, drawGlasses } from './frames.js';
 const BASE = new URL('./assets/glasses/', import.meta.url).href;
 let manifest = null, onReady = null;
@@ -68,23 +69,6 @@ function tortoiseField(W, H, F) {
   tortCache.set(key, d); while (tortCache.size > 2) tortCache.delete(tortCache.keys().next().value);
   return d;
 }
-// Eat the outer shell of a pre-rendered thick rim so acetate reads closer to a real 3–4 mm front.
-function slimAlpha(data, W, H, rad) {
-  if (rad < 1) return;
-  const srcA = new Uint8ClampedArray(W * H);
-  for (let i = 0; i < W * H; i++) srcA[i] = data[i * 4 + 3];
-  const tmp = new Uint8ClampedArray(W * H);
-  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-    let m = 255; const y0 = y * W;
-    for (let k = -rad; k <= rad; k++) { const xx = x + k; if (xx < 0 || xx >= W) { m = 0; break; } if (srcA[y0 + xx] < m) m = srcA[y0 + xx]; }
-    tmp[y0 + x] = m;
-  }
-  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-    let m = 255;
-    for (let k = -rad; k <= rad; k++) { const yy = y + k; if (yy < 0 || yy >= H) { m = 0; break; } if (tmp[yy * W + x] < m) m = tmp[yy * W + x]; }
-    data[(y * W + x) * 4 + 3] = m;
-  }
-}
 function colorize(key, frameId, accentWarm) {
   const ck = key + '|' + frameId + '|' + accentWarm; if (colCache.has(ck)) return colCache.get(ck);
   const info = manifest.keys[key];
@@ -106,19 +90,21 @@ function colorize(key, frameId, accentWarm) {
     const d = pixels(ia).data;
     const AF = (isMetal && (rim === 'brow' || rim === 'combo')) ? FRAMES.black : isMetal ? FRAMES.black : F;
     const base = hex(AF.c), tort = AF.kind === 'tortoise' ? tortoiseField(W, H, AF) : null, c2 = AF.c2 ? hex(AF.c2) : null;
-    const specK = AF.matte ? 0.12 : AF.kind === 'clear' ? 0.72 : 0.42;
+    const specK = AF.matte ? 0.14 : AF.kind === 'clear' ? 0.72 : 0.62;
     if (AF.kind === 'clear') { tintC = document.createElement('canvas'); tintC.width = W; tintC.height = H; tintImg = tintC.getContext('2d').createImageData(W, H); }
     const td = tintImg ? tintImg.data : null;
+    // dark acetate (black / navy / wine) reads as plastic only through its white reflections -> stronger specular on dark bases
+    const darkB = 110 * Math.max(0, 1 - (0.299 * base[0] + 0.587 * base[1] + 0.114 * base[2]) / 110);
     const y0 = H * 0.5 - 0.75 * PU, y1 = H * 0.5 + 0.55 * PU;
     for (let y = 0; y < H; y++) {
       const gy = Math.min(1, Math.max(0, (y - y0) / (y1 - y0)));
       for (let x = 0; x < W; x++) {
         const i = y * W + x, a = d[i * 4 + 3]; if (!a) continue;
-        const diff = d[i * 4] / 255 * 1.05, s0 = d[i * 4 + 1] / 255, spec = (AF.kind === 'clear' ? s0 * 150 : Math.pow(s0, 1.85) * 150) * specK;
+        const diff = d[i * 4] / 255 * 1.05, s0 = d[i * 4 + 1] / 255, spec = (AF.kind === 'clear' ? s0 * 150 : Math.pow(s0, 1.5) * (150 + darkB)) * specK;
         let r = base[0], g = base[1], b = base[2], al = a;
         if (tort) { r = tort[i * 4]; g = tort[i * 4 + 1]; b = tort[i * 4 + 2]; }
         if (c2) { const t = Math.max(0, (gy - 0.3) / 0.7); r += (c2[0] - r) * t; g += (c2[1] - g) * t; b += (c2[2] - b) * t; al = a * (1 - 0.45 * t); }
-        let k = Math.min(1.05, 0.72 + diff * 0.28);
+        let k = Math.min(1.12, 0.3 + diff * 0.86);
         if (AF.kind === 'clear') {
           const edge = Math.min(1, Math.max(0, 1 - d[i * 4] / 255 * 1.15)), sp = Math.min(1, spec / 140);
           if (td) { const dens = 0.42 + 0.4 * edge; td[i * 4] = 255 - (255 - r) * dens; td[i * 4 + 1] = 255 - (255 - g) * dens; td[i * 4 + 2] = 255 - (255 - b) * dens; td[i * 4 + 3] = a; }
@@ -131,7 +117,6 @@ function colorize(key, frameId, accentWarm) {
         o[i * 4 + 3] = ta * 255;
       }
     }
-    if (rim !== 'rimless') slimAlpha(o, W, H, Math.max(2, Math.round(PU * (sh.thk > 1.3 ? 0.028 : 0.046))));
   }
   fx.putImageData(out, 0, 0);
   if (tintC) tintC.getContext('2d').putImageData(tintImg, 0, 0);
@@ -142,9 +127,8 @@ function colorize(key, frameId, accentWarm) {
 }
 function mixh(h1, h2, t) { const a = hex(h1), b = hex(h2); return '#' + a.map((v, i) => Math.round(v + (b[i] - v) * t).toString(16).padStart(2, '0')).join(''); }
 
-export function drawGlasses3D(ctx, lensCtx, P, frameId, shapeId, gScale, accentWarm, hideTemples, tintCtx) {
+export function drawGlasses3D(ctx, lensCtx, P, frameId, shapeId, gScale, accentWarm, hideTemples, tintCtx, maskCtx) {
   const F0 = FRAMES[frameId];
-  if (F0 && F0.kind === 'tortoise') return false; // pattern stays on the rim; the photo layer was blowing the spots across the face
   const key = variantKey(shapeId, frameId); if (!key) return false;
   const res = colorize(key, frameId, accentWarm); if (!res || !res.k || res.k < 40) return false;
   if (!res.frame) drawGlasses(ctx, P, frameId, shapeId, gScale * 0.9, accentWarm, hideTemples, true);
@@ -155,10 +139,13 @@ export function drawGlasses3D(ctx, lensCtx, P, frameId, shapeId, gScale, accentW
   const e = { x: dx / d, y: dy / d }, n = { x: -e.y, y: e.x };
   const t = Math.min(d * 0.7, Math.max(d * 0.3, (P.B.x - L.x) * e.x + (P.B.y - L.y) * e.y));
   const C = { x: L.x + e.x * t, y: L.y + e.y * t };
-  const g = gScale * 0.82, u = (d / 2) * g, k = res.k, cx = res.W / 2, cy = res.H / 2;
+  // real-world size: the front is ~86% of the face width at the temples (MediaPipe 234/454), bounded by the pupil distance
+  // (1 unit = half IPD) so a turned head or a wide jaw cannot blow it up; the old fixed 0.82 x IPD left frames undersized
+  const half = (res.info.xout || 1.8) + 0.1, fw = P.oval && P.oval.length > 28 ? Math.hypot(P.oval[8].x - P.oval[28].x, P.oval[8].y - P.oval[28].y) : 0;
+  const uF = fw ? 0.86 * fw / (2 * half) : d / 2 * 0.92, uI = d / 2, g = gScale * Math.min(1.04, Math.max(0.86, uF / uI)), u = uI * g, k = res.k, cx = res.W / 2, cy = res.H / 2;
   if (u / k > 4) return false; // bad asset scale would stamp the frame texture over the whole face
   const sides = [{ s: (d - t) * g, sx: cx, sw: res.W - cx }, { s: t * g, sx: 0, sw: cx }];
-  const jobs = [[ctx, res.frame, 0.92], [lensCtx, res.lens, 0.28]]; if (tintCtx && res.tint) jobs.push([tintCtx, res.tint, 0.85]);
+  const jobs = [[ctx, res.frame, 1], [lensCtx, res.lens, 0.2]]; if (tintCtx && res.tint) jobs.push([tintCtx, res.tint, 0.85]); if (maskCtx) jobs.push([maskCtx, res.lens, 1]);
   for (const [target, src, alpha] of jobs) {
     target.imageSmoothingEnabled = true; target.imageSmoothingQuality = 'high'; target.globalAlpha = alpha;
     for (const sd of sides) {
@@ -167,7 +154,12 @@ export function drawGlasses3D(ctx, lensCtx, P, frameId, shapeId, gScale, accentW
     }
     target.globalAlpha = 1; target.setTransform(1, 0, 0, 1, 0, 0);
   }
-  return tintCtx && res.tint ? 'tint' : true;
+  // geometry for the app's temples / pads / shadows: local units -> screen (each half has its own horizontal scale = yaw)
+  const toS = (lx, ly) => { const sc = lx >= 0 ? sides[0].s : sides[1].s; return { x: C.x + e.x * sc * lx + n.x * u * ly, y: C.y + e.y * sc * lx + n.y * u * ly }; };
+  const hy = res.info.hingeY != null ? res.info.hingeY : -0.45, xo = res.info.xout || 1.8, F = FRAMES[frameId];
+  return { tint: !!(tintCtx && res.tint), u, sR: sides[0].s, sL: sides[1].s, C, e, n,
+    hinge: [toS(-(xo + 0.06), hy), toS(xo + 0.06, hy)], pads: [toS(-0.31, 0.12), toS(0.31, 0.12)],
+    lensC: [toS(-1.08, -0.04), toS(1.08, -0.04)], kind: F.kind, F, metal: key.endsWith('_wire') };
 }
 export function preloadGlasses3D(shapeId, frameId, timeout = 4000) {
   const key = variantKey(shapeId, frameId); if (!key) return Promise.resolve(false);

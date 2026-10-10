@@ -193,25 +193,83 @@ function boxBlur(src, w, h, r) {
     for (let y = 0; y < h; y++) { dst[y * w + x] = acc / (2 * r + 1); acc += tmp[Math.min(h - 1, y + r + 1) * w + x] - tmp[Math.max(0, y - r) * w + x]; } }
   return dst;
 }
+// v44: soft hair mask for dyeing the customer's own hair.
+//  1) temporal smoothing (live) + light blur of the segmenter confidence
+//  2) guided filter with the photo's luminance as guide: the mask edge snaps to real strand / background edges (feathered, no halo)
+//  3) skin guard: inside the face oval, skin-coloured pixels and everything below the brows are removed from the mask, so the dye
+//     never tints the forehead, brows or cheeks (the segmenter bleeds onto skin at low resolution)
+function guided(I, p, w, h, r, eps) {
+  const n = w * h, Ip = new Float32Array(n), II = new Float32Array(n);
+  for (let i = 0; i < n; i++) { Ip[i] = I[i] * p[i]; II[i] = I[i] * I[i]; }
+  const mI = boxBlur(I, w, h, r), mP = boxBlur(p, w, h, r), mIp = boxBlur(Ip, w, h, r), mII = boxBlur(II, w, h, r);
+  const A = Ip, B = II; // reuse
+  for (let i = 0; i < n; i++) { const v = mII[i] - mI[i] * mI[i], a = (mIp[i] - mI[i] * mP[i]) / (v + eps); A[i] = a; B[i] = mP[i] - a * mI[i]; }
+  const mA = boxBlur(A, w, h, r), mB = boxBlur(B, w, h, r), q = new Float32Array(n);
+  for (let i = 0; i < n; i++) q[i] = mA[i] * I[i] + mB[i];
+  return q;
+}
+const ycc = (r, g, b) => [0.299 * r + 0.587 * g + 0.114 * b, -0.1687 * r - 0.3313 * g + 0.5 * b, 0.5 * r - 0.4187 * g - 0.0813 * b];
 function buildSeg(masks, w, h, prev, lmP) {
   const hairRaw = masks[masks.length - 1];
   let m = hairRaw;
   if (prev && prev.w === w && prev.h === h) { const s = new Float32Array(m.length); for (let i = 0; i < m.length; i++) s[i] = prev.raw[i] * 0.45 + m[i] * 0.55; m = s; }
   else m = new Float32Array(m);
-  const raw = m;
+  const raw = m, n0 = w * h;
   const sm = boxBlur(m, w, h, Math.max(1, Math.round(Math.max(w, h) / 220)));
-  const px = segX.getImageData(0, 0, w, h).data;
+  const px = segX.getImageData(0, 0, w, h).data, I = new Float32Array(n0);
+  for (let i = 0; i < n0; i++) I[i] = (0.299 * px[i * 4] + 0.587 * px[i * 4 + 1] + 0.114 * px[i * 4 + 2]) / 255;
+  let a0 = new Float32Array(n0); for (let i = 0; i < n0; i++) { const a = clamp((sm[i] - 0.15) / 0.65, 0, 1); a0[i] = a * a * (3 - 2 * a); }
+  const q = S.dbgNoGuide ? a0 : guided(I, a0, w, h, Math.max(2, Math.round(Math.max(w, h) / 80)), 0.0035);
+  // keep the guided result only near the edge (interior stays solid, far background stays empty)
+  const al = new Float32Array(n0);
+  for (let i = 0; i < n0; i++) { const e = a0[i]; al[i] = e > 0.97 ? Math.max(e, q[i]) : sm[i] < 0.05 ? 0 : clamp(q[i] * 1.08 - 0.04, 0, 1); }
+  // wisps / flyaways and thin temple hair the low-res segmenter misses: in a narrow band around the mask, pixels whose colour matches
+  // the customer's hair (luma +-, chroma close) join the mask (skin-coloured ones are removed again by the guard below)
+  if (!S.dbgNoAff) {
+    let hY = 0, hb = 0, hr = 0, hn = 0;
+    for (let i = 0; i < n0; i++) if (a0[i] > 0.92) { const j = i * 4, c = ycc(px[j], px[j + 1], px[j + 2]); hY += c[0]; hb += c[1]; hr += c[2]; hn++; }
+    if (hn > 50) { hY /= hn; hb /= hn; hr /= hn;
+      const band = boxBlur(a0, w, h, Math.max(2, Math.round(Math.max(w, h) / 70)));
+      for (let i = 0; i < n0; i++) { const bd = band[i]; if (bd < 0.06 || al[i] > 0.9) continue;
+        const j = i * 4, c = ycc(px[j], px[j + 1], px[j + 2]), dl = Math.abs(c[0] - hY) / (hY * 0.45 + 18), dc = Math.hypot(c[1] - hb, c[2] - hr) / 9;
+        const aff2 = Math.exp(-(dl * dl + dc * dc)) * clamp((bd - 0.06) / 0.25, 0, 1);
+        if (aff2 > al[i]) al[i] = al[i] + (aff2 * 0.9 - al[i]) * 0.85; }
+    }
+  }
+  // skin guard (needs landmarks): canonical face coords via the face affine
+  const P = lmP, aff = P && P.aff;
+  let skin = null;
+  if (aff && !S.dbgNoSkin) {
+    const IA = invAffine(aff), sx = segScaleX, sy = segScaleY, fpx = Math.hypot(aff.a, aff.b) / sx; // face half-width in seg px
+    let cr = 0, cb = 0, cy0 = 0, cn = 0; const half = Math.max(1, Math.round(fpx * 0.08));
+    for (const gx of [-0.5, 0.5]) { const X = Math.round((aff.a * gx + aff.c * 0.38 + aff.e) / sx), Y = Math.round((aff.b * gx + aff.d * 0.38 + aff.f) / sy);
+      for (let yy = Y - half; yy <= Y + half; yy++) for (let xx = X - half; xx <= X + half; xx++) { if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue; const j = (yy * w + xx) * 4, c = ycc(px[j], px[j + 1], px[j + 2]); cy0 += c[0]; cb += c[1]; cr += c[2]; cn++; } }
+    if (cn > 4) { skin = [cy0 / cn, cb / cn, cr / cn];
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        const i = y * w + x; if (al[i] <= 0) continue;
+        const X = x * sx, Y = y * sy, u = IA.a * X + IA.c * Y + IA.e, v = IA.b * X + IA.d * Y + IA.f;
+        const r2 = u * u + ((v - 0.2) / 1.22) ** 2; if (r2 > 1.25) continue; // outside the face (+ margin): segmenter decides
+        const inF = clamp((1.25 - r2) / 0.3, 0, 1);
+        // below the brows (eyes, cheeks, nose, mouth): never hair for the dye; soft ramp around the brow line
+        const below = clamp((v + 0.5) / 0.14, 0, 1) * clamp((0.92 - Math.abs(u)) / 0.12, 0, 1);
+        const j = i * 4, c = ycc(px[j], px[j + 1], px[j + 2]);
+        const dc = Math.hypot(c[1] - skin[1], c[2] - skin[2]), lr = c[0] / (skin[0] + 1);
+        const sl = Math.exp(-(dc * dc) / 90) * clamp((lr - 0.55) / 0.2, 0, 1); // skin-coloured and not much darker than skin
+        al[i] *= 1 - inF * Math.max(below, 0.92 * sl);
+      }
+    }
+  }
   let sumY = 0, sr = 0, sg = 0, sb = 0, n = 0, x0 = w, y0 = h, x1 = -1, y1 = -1;
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-    const i = y * w + x, v = sm[i];
-    if (v > 0.25) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
-    if (v > 0.6) { const j = i * 4; sumY += 0.299 * px[j] + 0.587 * px[j + 1] + 0.114 * px[j + 2]; sr += px[j]; sg += px[j + 1]; sb += px[j + 2]; n++; }
+    const i = y * w + x, v = al[i];
+    if (v > 0.12) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+    if (v > 0.8) { const j = i * 4; sumY += 0.299 * px[j] + 0.587 * px[j + 1] + 0.114 * px[j + 2]; sr += px[j]; sg += px[j + 1]; sb += px[j + 2]; n++; }
   }
-  const out = { raw, w, h, cover: n / (w * h), empty: true };
+  const out = { raw, w, h, cover: n / n0, empty: true, skin };
   if (x1 >= 0 && out.cover >= 0.002) {
     const id = new ImageData(w, h);
-    for (let i = 0; i < sm.length; i++) { let a = clamp((sm[i] - 0.18) / 0.62, 0, 1); a = a * a * (3 - 2 * a); id.data[i * 4 + 3] = a * 255; id.data[i * 4] = id.data[i * 4 + 1] = id.data[i * 4 + 2] = 255; }
-    Object.assign(out, { id, meanY: Math.max(18, sumY / n), meanRGB: [sr / n, sg / n, sb / n], bbox: [x0 / w, y0 / h, (x1 + 1) / w, (y1 + 1) / h], empty: false });
+    for (let i = 0; i < n0; i++) { id.data[i * 4 + 3] = al[i] * 255; id.data[i * 4] = id.data[i * 4 + 1] = id.data[i * 4 + 2] = 255; }
+    Object.assign(out, { id, meanY: Math.max(14, sumY / n), meanRGB: [sr / n, sg / n, sb / n], bbox: [x0 / w, y0 / h, (x1 + 1) / w, (y1 + 1) / h], empty: false });
   }
   return out;
 }
@@ -236,17 +294,25 @@ function takeMasks(result) {
   return { masks: ms.map((m) => m.getAsFloat32Array()), w: ms[0].width, h: ms[0].height };
 }
 
-/* ------------------------------------------------------------------ hair recolor */
+/* ------------------------------------------------------------------ hair recolor (dye on the customer's own hair) */
+// v44: luminance-preserving dye. The hair's own brightness relative to its mean (strands, shine, roots, shadows) is kept as texture
+// and re-centred on the dye's luminance (lift / deepen like a real colour, capped so black hair does not turn flat beige); chroma is
+// taken from the dye (YCbCr colour blend), rolled off in deep shadow and on speculars so shine stays near-neutral like real hair.
 let lutCache = {};
 function hairLUT(hex, meanY) {
   const key = hex + '|' + Math.round(meanY);
   if (lutCache[key]) return lutCache[key];
-  const [tr, tg, tb] = hex2rgb(hex); const lut = new Uint8ClampedArray(256 * 3);
+  const [tr, tg, tb] = hex2rgb(hex), [tY, tCb, tCr] = ycc(tr, tg, tb);
+  // realistic lift: very dark hair cannot go fully to a light dye in one step -> target luminance pulled 25% toward the hair's own
+  const Yt = Math.max(10, meanY < tY ? tY - (tY - meanY) * 0.22 : tY);
+  const lut = new Float32Array(256 * 3);
   for (let y = 0; y < 256; y++) {
     const r = (y + 1) / (meanY + 1);
-    const k = r < 1 ? Math.pow(r, 0.85) : 1 + (Math.pow(r, 0.75) - 1) * 0.9;
-    const hl = Math.max(0, k - 1) * 40;
-    lut[y * 3] = tr * k + hl; lut[y * 3 + 1] = tg * k + hl; lut[y * 3 + 2] = tb * k + hl;
+    const k = r < 1 ? Math.pow(r, 0.9) : 1 + (Math.pow(r, 0.78) - 1) * 0.92;
+    let Yo = Yt * k + Math.max(0, k - 1) * 26; // keep some neutral shine on dark dyes
+    Yo = Yo > 215 ? 215 + (Yo - 215) * 0.45 : Yo;
+    const sat = clamp(Yo / (Yt + 1), 0, 1.25) ** 0.7 * (1 - 0.6 * clamp((Yo - 185) / 60, 0, 1)) * clamp(Yo / 12, 0, 1);
+    lut[y * 3] = Yo; lut[y * 3 + 1] = tCb * sat; lut[y * 3 + 2] = tCr * sat;
   }
   if (Object.keys(lutCache).length > 40) lutCache = {};
   return (lutCache[key] = lut);
@@ -258,10 +324,12 @@ function applyHair(ctx, W, H, mask, hex, intensity) {
   const w = Math.min(W, Math.ceil((bx1 + pad) * W)) - x, h = Math.min(H, Math.ceil((by1 + pad) * H)) - y;
   if (w <= 0 || h <= 0) return;
   if (recC.width !== W || recC.height !== H) { recC.width = W; recC.height = H; }
-  const img = rawX.getImageData(x, y, w, h), d = img.data, lut = hairLUT(hex, mask.meanY);
+  const img = rawX.getImageData(x, y, w, h), d = img.data, lut = hairLUT(hex, mask.meanY), KO = 0.14; // KO: share of the original chroma kept
   for (let i = 0; i < d.length; i += 4) {
-    const Y = (77 * d[i] + 150 * d[i + 1] + 29 * d[i + 2]) >> 8, j = Y * 3;
-    d[i] = lut[j] * 0.92 + d[i] * 0.08; d[i + 1] = lut[j + 1] * 0.92 + d[i + 1] * 0.08; d[i + 2] = lut[j + 2] * 0.92 + d[i + 2] * 0.08;
+    const R = d[i], G = d[i + 1], B = d[i + 2], Y = (77 * R + 150 * G + 29 * B) >> 8, j = Y * 3;
+    const oCb = -0.1687 * R - 0.3313 * G + 0.5 * B, oCr = 0.5 * R - 0.4187 * G - 0.0813 * B;
+    const Yo = lut[j], Cb = lut[j + 1] * (1 - KO) + oCb * KO, Cr = lut[j + 2] * (1 - KO) + oCr * KO;
+    d[i] = Yo + 1.402 * Cr; d[i + 1] = Yo - 0.344136 * Cb - 0.714136 * Cr; d[i + 2] = Yo + 1.772 * Cb;
   }
   recX.globalCompositeOperation = 'source-over'; recX.clearRect(0, 0, W, H); recX.putImageData(img, x, y);
   if (maskC.width !== mask.w || maskC.height !== mask.h) { maskC.width = mask.w; maskC.height = mask.h; }
@@ -283,29 +351,91 @@ function compose(W, H, P, mask) {
   if (hiScale === 1) glassesPass(outX, W, H, P);
   stats.glassMs = stats.glassMs * 0.9 + (performance.now() - t1) * 0.1;
 }
+// v44 glasses pass (photo layers): contact shadows (tight + soft, nose pads) -> lens refraction (minus lens: the eye area is seen
+// ~2% smaller and slightly shifted toward the lens centre) -> faint reflections -> temples behind / beside the face -> frame
+const refrC = mk(), refrX = refrC.getContext('2d'), lmaskC = mk(), lmaskX = lmaskC.getContext('2d'), tmpC = mk(), tmpX = tmpC.getContext('2d'), shC2 = mk(), shX2 = shC2.getContext('2d');
+function ovalPath(x, P, k = 1, shrink = 0.02) {
+  const cx = (P.top.x + P.chin.x) / 2, cy = (P.top.y + P.chin.y) / 2; x.beginPath();
+  P.oval.forEach((p, i) => { const X = (p.x + (cx - p.x) * shrink) * k, Y = (p.y + (cy - p.y) * shrink) * k; i ? x.lineTo(X, Y) : x.moveTo(X, Y); }); x.closePath();
+}
+function drawTemples(x, P, g, W, H) {
+  if (!P.oval || P.oval.length < 30) return;
+  const F = g.F, metal = F.kind === 'metal' || g.metal, u = g.u;
+  const yaw = (g.sR - g.sL) / (g.sR + g.sL); // > 0: the image-right half is wider (turned toward it)
+  const col = metal ? F.c : F.kind === 'clear' ? mix(F.c, '#ffffff', 0.25) : F.kind === 'grad' ? F.c : F.c;
+  const hi = metal ? (F.hi || mix(F.c, '#ffffff', 0.5)) : mix(col, '#ffffff', 0.35), lo = metal ? (F.lo || mix(F.c, '#000000', 0.5)) : mix(col, '#000000', 0.45);
+  const ear = [P.oval[28], P.oval[8]]; // MediaPipe 234 (image left) / 454 (image right), around the tragus
+  // work in a small canvas covering only the temples (the full-frame temp canvas cost ~5 ms per live frame on lite)
+  const xs = [g.hinge[0].x, g.hinge[1].x, ear[0].x, ear[1].x], ys = [g.hinge[0].y, g.hinge[1].y, ear[0].y, ear[1].y];
+  const bx = Math.max(0, Math.floor(Math.min(...xs) - u * 0.4)), by = Math.max(0, Math.floor(Math.min(...ys) - u * 0.5));
+  const bw = Math.min(W, Math.ceil(Math.max(...xs) + u * 0.4)) - bx, bh = Math.min(H, Math.ceil(Math.max(...ys) + u * 0.4)) - by; if (bw < 2 || bh < 2) return;
+  ensure(tmpC, bw, bh); tmpX.setTransform(1, 0, 0, 1, -bx, -by); tmpX.clearRect(bx, by, bw, bh);
+  for (let side = 0; side < 2; side++) {
+    const h0 = g.hinge[side], E = ear[h0.x < g.C.x ? 0 : 1], far = side === 0 ? yaw > 0.1 : yaw < -0.1, frontal = Math.abs(yaw) <= 0.1;
+    // temple end: just above the ear, a little behind the face outline
+    const ex = E.x + (E.x - g.C.x) * 0.04, ey = E.y - u * 0.18, len = Math.hypot(ex - h0.x, ey - h0.y); if (len < 2) continue;
+    const tx = (ex - h0.x) / len, ty = (ey - h0.y) / len, nx = -ty, ny = tx;
+    const w0 = u * (metal ? 0.05 : 0.13), w1 = u * (metal ? 0.035 : 0.075);
+    tmpX.save(); tmpX.beginPath();
+    tmpX.moveTo(h0.x + nx * w0 / 2, h0.y + ny * w0 / 2); tmpX.lineTo(ex + nx * w1 / 2, ey + ny * w1 / 2);
+    tmpX.lineTo(ex - nx * w1 / 2, ey - ny * w1 / 2); tmpX.lineTo(h0.x - nx * w0 / 2, h0.y - ny * w0 / 2); tmpX.closePath();
+    const gr = tmpX.createLinearGradient(h0.x + nx * w0 / 2, h0.y + ny * w0 / 2, h0.x - nx * w0 / 2, h0.y - ny * w0 / 2);
+    gr.addColorStop(0, hi); gr.addColorStop(0.35, col); gr.addColorStop(0.8, lo); gr.addColorStop(1, lo);
+    tmpX.fillStyle = gr; tmpX.globalAlpha = F.kind === 'clear' ? 0.6 : 1; tmpX.fill();
+    // fade out toward the ear (tucked behind ear / hair)
+    tmpX.globalCompositeOperation = 'destination-out'; tmpX.globalAlpha = 1;
+    const fd = tmpX.createLinearGradient(h0.x + tx * len * 0.55, h0.y + ty * len * 0.55, ex, ey); fd.addColorStop(0, 'rgba(0,0,0,0)'); fd.addColorStop(1, 'rgba(0,0,0,1)');
+    tmpX.fillStyle = fd; tmpX.fillRect(Math.min(h0.x, ex) - w0 * 2, Math.min(h0.y, ey) - w0 * 2, Math.abs(ex - h0.x) + w0 * 4, Math.abs(ey - h0.y) + w0 * 4);
+    tmpX.restore();
+    // the far temple (and both on a frontal face) runs behind the head: hide it inside the face outline
+    if (far || frontal) { tmpX.save(); tmpX.beginPath(); tmpX.rect(side === 0 ? 0 : g.C.x, 0, side === 0 ? g.C.x : W - g.C.x, H); tmpX.clip();
+      tmpX.globalCompositeOperation = 'destination-out'; ovalPath(tmpX, P, 1, 0.015); tmpX.fill(); tmpX.restore(); }
+  }
+  tmpX.setTransform(1, 0, 0, 1, 0, 0); x.drawImage(tmpC, bx, by);
+}
 function glassesPass(outX, W, H, P) {
   ensure(glassC, W, H); ensure(lensC, W, H); ensure(tintC, W, H); glassX.setTransform(1,0,0,1,0,0); glassX.clearRect(0,0,W,H); lensX.setTransform(1,0,0,1,0,0); lensX.clearRect(0,0,W,H); tintX.setTransform(1,0,0,1,0,0); tintX.clearRect(0,0,W,H);
-  if (P && S.shape !== 'none') {
-    const hideT = false;
-    const photo = !S.procGlasses && drawGlasses3D(glassX, lensX, P, S.frame, S.shape, S.gScale, TYPES[S.type].warm, hideT, tintX);
-    stats.glass3d = !!photo;
-    if (!photo) drawGlasses(glassX, P, S.frame, S.shape, S.gScale, TYPES[S.type].warm, hideT);
-    const d = Math.hypot(P.iR.x - P.iL.x, P.iR.y - P.iL.y);
-    const sw = Math.max(8, Math.round(W / 6)), sh = Math.max(8, Math.round(H / 6));
-    ensure(shadowC, sw, sh);
-    shadowX.globalCompositeOperation = 'source-over'; shadowX.clearRect(0, 0, sw, sh); shadowX.drawImage(glassC, 0, 0, sw, sh);
-    shadowX.globalCompositeOperation = 'source-in'; shadowX.fillStyle = 'rgb(25,12,12)'; shadowX.fillRect(0, 0, sw, sh);
-    outX.save(); outX.imageSmoothingEnabled = true;
-    // two-tier contact shadow: tight occlusion right under the rims + wide soft shadow falling on cheeks/nose (light from above)
-    outX.globalAlpha = 0.12; outX.drawImage(shadowC, 0, d * 0.02, W, H); outX.restore();
-    if (photo) {
-      // lens: slight darkening of what is behind, then reflections (screen)
-      outX.save(); outX.globalCompositeOperation = 'source-over'; outX.globalAlpha = 0.07;
-      outX.drawImage(lensDark(), 0, 0); outX.globalAlpha = 0.38; outX.globalCompositeOperation = 'screen'; outX.drawImage(lensC, 0, 0); outX.restore();
-      if (photo === 'tint') { outX.save(); outX.globalCompositeOperation = 'multiply'; outX.drawImage(tintC, 0, 0); outX.restore(); }
+  if (!P || S.shape === 'none') return;
+  ensure(lmaskC, W, H); lmaskX.setTransform(1, 0, 0, 1, 0, 0); lmaskX.clearRect(0, 0, W, H);
+  const g = !S.procGlasses && drawGlasses3D(glassX, lensX, P, S.frame, S.shape, S.gScale, TYPES[S.type].warm, false, tintX, lmaskX);
+  stats.glass3d = !!g;
+  if (!g) drawGlasses(glassX, P, S.frame, S.shape, S.gScale, TYPES[S.type].warm, false);
+  const d = Math.hypot(P.iR.x - P.iL.x, P.iR.y - P.iL.y);
+  // 1) contact shadows: frame silhouette (+ temples + nose pads), darkened, tight (rim on skin) and soft (light from above)
+  const sw = Math.max(8, Math.round(W / 4)), sh = Math.max(8, Math.round(H / 4)), k4 = sw / W;
+  ensure(shadowC, sw, sh); shadowX.setTransform(1, 0, 0, 1, 0, 0); shadowX.globalCompositeOperation = 'source-over'; shadowX.clearRect(0, 0, sw, sh);
+  shadowX.drawImage(glassC, 0, 0, sw, sh);
+  if (g && g.pads) { shadowX.fillStyle = '#000'; for (const p of g.pads) { shadowX.beginPath(); shadowX.ellipse(p.x * k4, (p.y + g.u * 0.05) * k4, g.u * 0.07 * k4, g.u * 0.13 * k4, 0, 0, 7); shadowX.fill(); } }
+  shadowX.globalCompositeOperation = 'source-in'; shadowX.fillStyle = 'rgb(38,20,14)'; shadowX.fillRect(0, 0, sw, sh);
+  const sw2 = Math.max(4, Math.round(W / 12)), sh2 = Math.max(4, Math.round(H / 12)); ensure(shC2, sw2, sh2); shX2.clearRect(0, 0, sw2, sh2); shX2.imageSmoothingEnabled = true; shX2.drawImage(shadowC, 0, 0, sw2, sh2);
+  outX.save(); outX.imageSmoothingEnabled = true; outX.imageSmoothingQuality = 'high';
+  outX.globalAlpha = 0.2; outX.drawImage(shadowC, 0, d * 0.012, W, H);
+  outX.globalAlpha = 0.16; outX.drawImage(shC2, 0, d * 0.05, W, H);
+  outX.restore();
+  if (g) {
+    const geo = typeof g === 'object' && g.hinge; // older glasses3d (bool / 'tint') has no geometry
+    // 2) refraction: minus (myopia) lens -> what is behind looks a little smaller, pulled toward each lens centre
+    if (geo && !S.dbgNoRefr) {
+      const m = 0.978, u = g.u, ax = Math.max(0, Math.floor(Math.min(g.lensC[0].x, g.lensC[1].x) - u * 1.1)), ay = Math.max(0, Math.floor(Math.min(g.lensC[0].y, g.lensC[1].y) - u * 1.0));
+      const aw = Math.min(W, Math.ceil(Math.max(g.lensC[0].x, g.lensC[1].x) + u * 1.1)) - ax, ah = Math.min(H, Math.ceil(Math.max(g.lensC[0].y, g.lensC[1].y) + u * 1.0)) - ay;
+      if (aw > 2 && ah > 2) {
+        ensure(refrC, aw, ah); refrX.setTransform(1, 0, 0, 1, 0, 0); refrX.globalCompositeOperation = 'source-over'; refrX.clearRect(0, 0, aw, ah);
+        for (const c of g.lensC) {
+          refrX.save(); refrX.beginPath(); if (c.x < g.C.x) refrX.rect(0, 0, g.C.x - ax, ah); else refrX.rect(g.C.x - ax, 0, aw, ah); refrX.clip();
+          refrX.setTransform(m, 0, 0, m, c.x * (1 - m) - ax, c.y * (1 - m) - ay); refrX.drawImage(outX.canvas, 0, 0); refrX.restore();
+        }
+        refrX.globalCompositeOperation = 'destination-in'; refrX.drawImage(lmaskC, ax, ay, aw, ah, 0, 0, aw, ah); refrX.globalCompositeOperation = 'source-over';
+        outX.drawImage(refrC, ax, ay);
+      }
     }
-    outX.drawImage(glassC, 0, 0);
+    // 3) lens: barely-there darkening + soft reflections (no milky fill)
+    outX.save(); outX.globalAlpha = 0.035; outX.drawImage(lensDark(), 0, 0);
+    outX.globalAlpha = 0.55; outX.globalCompositeOperation = 'screen'; outX.drawImage(lensC, 0, 0); outX.restore();
+    if (g === 'tint' || g.tint) { outX.save(); outX.globalCompositeOperation = 'multiply'; outX.drawImage(tintC, 0, 0); outX.restore(); }
+    // 4) temples (under the front, which covers the hinge)
+    if (geo && !S.dbgNoTemples) drawTemples(outX, P, g, W, H);
   }
+  outX.drawImage(glassC, 0, 0);
 }
 // glasses are drawn at display resolution (canvas px = CSS px x devicePixelRatio) on top of the upscaled photo/video frame,
 // so rims, hinges and reflections stay crisp instead of being upscaled with a low-res live frame
@@ -1009,7 +1139,7 @@ const coverEl = $('cover');
 function coverLoad(t) { const e = $('cvLoad'); if (e) e.textContent = t; }
 function purgeStillCaches() { // next customer: drop all decoded / colourised hair and glasses layers
   try { purgeGlasses3D(); } catch (e) {}
-  for (const c of [glassC, lensC, tintC, paneC, segIn, recC, darkC, shadowC, maskC]) { c.width = c.height = 1; }
+  for (const c of [glassC, lensC, tintC, paneC, segIn, recC, darkC, shadowC, maskC, refrC, lmaskC, tmpC, shC2]) { c.width = c.height = 1; }
 }
 let sessGen = 0, homing = false;
 // 다음 고객 (home button) and the idle auto-return share this: photo wiped, camera off, back to the cover

@@ -1,11 +1,11 @@
-# 퍼스널컬러 가상 피팅 (안경테 · 헤어 컬러 · 헤어스타일)
+# 퍼스널컬러 가상 피팅 (안경테 · 헤어 컬러)
 
-Static, 100% client-side web app (index.html / style.css / app.js / frames.js / hairstyle.js). Camera frames and photos are processed on the device and never uploaded.
+Static, 100% client-side web app (index.html / style.css / app.js / frames.js / glasses3d.js / face.js / reco.js). Camera frames and photos are processed on the device and never uploaded.
 
 - MediaPipe Tasks Vision 1.0.1 (jsDelivr CDN): FaceLandmarker (478 pts) + ImageSegmenter (hair_segmenter)
 - Live mode (default when a camera exists): landmarks every frame (One-Euro smoothing), hair mask every 2–4 frames, GPU delegate with auto-switch to CPU when the GPU path is slow
 - Glasses (v3): photoreal front-view layers pre-rendered in Blender/Cycles (`assets/glasses`, 34 shape variants) recoloured per material in the browser (metal gradient-map, acetate/tortoise/clear/gradient tints keeping the rendered highlights), warped onto the face from iris/nose-bridge landmarks, with lens reflections (screen), slight lens darkening and a soft contact shadow. The old procedural renderer (`frames.js`) is the fallback while assets load (`?proc` forces it).
-- Hairstyles (v3): photoreal hair cut-outs (`assets/hair`, 14 styles + bang variants) from locally generated portraits, matted with MediaPipe hair segmentation + closed-form matting, stored as luminance+alpha in a canonical face space and recoloured with the chosen hair colour; procedural templates (`hairstyle.js`) remain as fallback. Templates are anchored with a least-squares affine to face landmarks; original hair is inpainted (push-pull fill), the face oval/neck occlude the new hair, and the chosen color tints the template
+- Hair colour (v44): the customer's own hair is dyed on-device (MediaPipe hair_segmenter, self-hosted + service-worker cached). Hairstyle templates were removed in v44.
 - URL flags: `?photo`, `?sample`, `?cpu`, `?res=640`
 
 ## 앱 설치 (PWA)
@@ -16,6 +16,16 @@ Static, 100% client-side web app (index.html / style.css / app.js / frames.js / 
 
 
 See `assets/CREDITS.md` for asset sources and licenses. Everything runs on-device; there is no server/API feature.
+
+## 실제 안경 · 내 머리 염색 (v44)
+- 헤어스타일 합성 기능 삭제: 헤어스타일 이미지·UI·추천, 이마 지우기/다시 칠하기 전부 제거 (결과 시트에서도 제외). `hairstyle.js`, `assets/hair` 삭제, 얼굴 좌표 함수는 `face.js`.
+- 헤어 컬러 = 고객 본인 머리 염색: MediaPipe 헤어 세그멘테이션(오프라인 캐시) → 부드러운 마스크(가이디드 필터로 모발 경계에 맞춤, 잔머리는 모발색 유사도로 보강, 얼굴 안쪽 피부색·눈썹 아래는 제외) → 휘도·결 유지 염색(원래 밝기 대비를 유지한 채 염색 색의 밝기로 이동, 크로마는 염색 색으로 블렌드, 그림자·광택은 채도 감소). 강도 슬라이더 = 염색 세기. 라이브(마스크 2~4프레임마다, 라이트 모드) · 사진 · 결과 시트 · 저장 이미지 모두 동일.
+- 계절별 헤어 컬러 팔레트와 추천 TOP 3 컬러 유지.
+- 안경 (Blender/Cycles 재렌더): 실제 비율 (뿔테 앞면 ~4 mm, 위쪽이 두껍고 아래가 얇은 형태, 둥근 모서리 / 메탈 ~1.6 mm), 키 라이트 + 스튜디오 HDRI로 광택·입체감. 브라우저에서 테 깎기(slim) 제거.
+- 크기: 얼굴 폭(234/454)의 ~86% (동공 거리 기준 0.86~1.04배로 제한), 코받침 위치 그대로.
+- 다리(템플): 경첩에서 귀 쪽으로 가늘어지며, 얼굴 뒤로 가는 쪽은 얼굴 윤곽 안에서 가려짐, 끝은 귀/머리 뒤로 사라짐.
+- 렌즈: 투명 (뿌연 채움 없음), 약한 반사 + 오목렌즈 굴절(렌즈 안이 ~2% 작게 보임). 그림자: 테 바로 아래 짧은 접촉 그림자 + 부드러운 그림자 + 코받침 그림자.
+- 호피(tortoise)도 사진 레이어로 렌더 (예전엔 절차적 테로 대체).
 
 ## 이마 자연스럽게 (v23)
 - 남성 헤어(투블럭·댄디·리프·가르마·쉼표) 착용 시 이마에 생기던 밝고 각진 덧칠 자국과 원래 머리 비침을 고쳤습니다.

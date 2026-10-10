@@ -108,24 +108,6 @@ export const GLASSES_BY_FACE = {
   diamond: [['cateye', '눈꼬리 라인이 광대를 자연스럽게 분산'], ['browline', '하금테 상단이 좁은 이마 라인을 넓혀 보이게'], ['oval', '부드러운 오벌이 도드라진 광대를 완화'], ['rimless', '무테로 광대 부각 없이 깔끔하게']],
   oval: [['boston', '균형 잡힌 얼굴에 잘 맞는 클래식 보스턴'], ['wellington', '어떤 스타일에도 어울리는 웰링턴'], ['cateye', '포인트를 주는 캣아이로 세련되게'], ['round', '라운드로 부드럽고 지적인 인상']],
 };
-export const HAIR_BY_FACE = {
-  f: {
-    round: [['long', 'seethrough', '세로로 떨어지는 생머리가 얼굴을 갸름하게'], ['layered_bob', 'seethrough', '정수리 볼륨+레이어로 둥근 윤곽을 보완'], ['hush', 'seethrough', '얼굴선을 감싸는 레이어가 볼살을 커버']],
-    square: [['wave', 'none', 'S컬 웨이브가 각진 턱선을 부드럽게'], ['ccurl', 'seethrough', '턱선에서 안으로 말리는 C컬이 골격을 완화'], ['hippie', 'seethrough', '풍성한 컬이 시선을 분산']],
-    long: [['bob', 'full', '풀뱅+단발로 얼굴 길이를 짧아 보이게'], ['ccurl', 'full', '옆 볼륨이 있는 C컬로 가로 폭 보완'], ['hush', 'full', '앞머리와 레이어로 세로 길이 분산']],
-    heart: [['ccurl', 'seethrough', '턱선 볼륨이 좁은 하관을 채워줌'], ['bob', 'seethrough', '턱 길이 단발로 상하 균형'], ['wave', 'none', '아래로 풍성해지는 웨이브로 균형']],
-    diamond: [['bob', 'seethrough', '시스루뱅이 좁은 이마를 커버, 광대 완화'], ['hush', 'seethrough', '광대 옆 레이어가 윤곽을 부드럽게'], ['ccurl', 'none', '턱선 C컬로 하관에 볼륨']],
-    oval: [['long', 'none', '균형 잡힌 얼굴형을 살리는 생머리'], ['bob', 'none', '깔끔한 단발로 세련된 인상'], ['wave', 'none', '여성스러운 S컬 웨이브']],
-  },
-  m: {
-    round: [['twoblock', null, '옆은 짧게, 윗머리 볼륨으로 얼굴이 길어 보이게'], ['garma', null, '가르마로 세로 라인을 만들어 갸름하게'], ['comma', null, '이마 라인 포인트로 둥근 윤곽 보완']],
-    square: [['garma', null, '부드러운 웨이브가 각진 골격을 완화'], ['leaf', null, '흐르는 리프컷이 턱선 인상을 부드럽게'], ['comma', null, '곡선 앞머리로 강한 인상을 중화']],
-    long: [['dandy', null, '내린 앞머리가 얼굴 길이를 짧아 보이게'], ['leaf', null, '옆 볼륨이 가로 폭을 보완'], ['comma', null, '이마를 덮는 라인으로 길이 분산']],
-    heart: [['dandy', null, '내린 앞머리가 넓은 이마를 자연스럽게 커버'], ['leaf', null, '옆머리 볼륨으로 하관과 균형'], ['comma', null, '사선 앞머리로 이마 면적 분산']],
-    diamond: [['dandy', null, '앞머리로 좁은 이마를 커버, 광대 완화'], ['comma', null, '이마 라인을 채워 윤곽 균형'], ['leaf', null, '옆 볼륨으로 광대 부각 완화']],
-    oval: [['garma', null, '균형 잡힌 얼굴형에 잘 맞는 가르마펌'], ['comma', null, '트렌디한 쉼표머리'], ['twoblock', null, '깔끔한 투블럭']],
-  },
-};
 export const COLOR_REASON = { spring: '밝고 따뜻한 톤이 피부를 화사하게', summer: '부드럽고 차분한 쿨톤이 피부를 맑게', autumn: '깊고 따뜻한 톤이 피부에 윤기를', winter: '선명하고 차가운 톤이 이목구비를 또렷하게' };
 const isMetal = (FRAMES, f) => FRAMES[f] && FRAMES[f].kind === 'metal';
 // for men: no cat-eye (the face-shape lists have a 4th entry that moves up) and no pink / lavender / peach / rose frame colours
@@ -143,7 +125,6 @@ export function recommend({ shape, type, sub, gender, TYPES, FRAMES, SHAPE_BY_ID
     const f = (pref.length ? pref : pal)[Math.floor(i / 2) % (pref.length || pal.length)];
     return { shape: s, frame: f, why, colorWhy: `${FRAMES[f].n} · ${T.n} 팔레트` };
   });
-  const hair = HAIR_BY_FACE[gender][shape].slice(0, 3).map(([style, bang, why]) => ({ style, bang, why }));
   const colors = (T.hair.filter((h) => h.t.includes(sub)).concat(T.hair.filter((h) => !h.t.includes(sub)))).slice(0, 3).map((h) => ({ hair: h, why: COLOR_REASON[type] }));
-  return { glasses, hair, colors };
+  return { glasses, colors };
 }

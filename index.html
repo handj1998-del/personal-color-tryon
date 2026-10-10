@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#faf8f4">
-<meta name="description" content="안경테 · 헤어 컬러 · 헤어스타일 실시간 가상 피팅 (퍼스널컬러 상담용, 사진은 기기 밖으로 전송되지 않음)">
+<meta name="description" content="안경테 · 헤어 컬러 실시간 가상 피팅 (퍼스널컬러 상담용, 사진은 기기 밖으로 전송되지 않음)">
 <title>가상이미지 매칭</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
@@ -56,7 +56,6 @@
       <div class="rc-sum" id="rcSum"></div>
       <div class="rc-sec"><h3>퍼스널컬러 <small>컨설턴트가 직접 선택할 수 있어요</small></h3><div class="rc-seg" id="rcTypes"></div><div class="rc-seg sm" id="rcSubs"></div></div>
       <div class="rc-sec"><h3>안경 추천</h3><ol class="rc-list" id="rcGlasses"></ol></div>
-      <div class="rc-sec"><h3>헤어스타일 추천 <span class="rc-seg sm inline" id="rcGender"></span></h3><ol class="rc-list" id="rcHair"></ol></div>
       <div class="rc-sec"><h3>헤어 컬러 추천</h3><ol class="rc-list" id="rcColors"></ol></div>
       <p class="rc-disc">얼굴 비율과 피부·모발·눈동자 색을 기기 안에서 분석한 참고용 추천입니다. 조명·카메라·메이크업에 따라 달라질 수 있으니 최종 진단은 컨설턴트가 확인해 주세요.</p>
       <div class="rc-actions"><button id="rcRetake" class="rc-btn ghost">다시 촬영</button><button id="rcGo" class="rc-btn">실시간 테스트 시작</button></div>
@@ -64,7 +63,7 @@
   </div>
 </section>
 <header class="top">
-  <div class="brand"><span class="wordmark">H.O.W</span><div><h1>퍼스널컬러 가상 피팅</h1><p>안경테 · 헤어 컬러 · 헤어스타일 실시간 테스트</p></div></div>
+  <div class="brand"><span class="wordmark">H.O.W</span><div><h1>퍼스널컬러 가상 피팅</h1><p>안경테 · 헤어 컬러 실시간 테스트</p></div></div>
   <div class="top-right">
     <button id="btnHome" class="home" title="표지로 · 다음 고객" aria-label="다음 고객 (표지 화면으로)">🏠<span>다음 고객</span></button>
     <button id="btnInstall" class="install" hidden>📲 <span>앱 설치</span></button>
@@ -132,40 +131,6 @@
       <h2>퍼스널컬러 타입</h2>
       <div class="types" id="types"></div>
       <div class="subs" id="subs"></div>
-    </div>
-
-    <div class="card">
-      <div class="card-head"><h2>헤어스타일</h2><div class="subs tight" id="genders"></div></div>
-      <div class="styles" id="styleList"></div>
-      <div id="bangRow" hidden><h3>앞머리</h3><div class="subs" id="bangList"></div></div>
-      <div class="slider-row">
-        <span>적용</span>
-        <button type="button" id="hairApply" class="upd-btn">다시 적용</button>
-        <button type="button" id="hairClear" class="upd-btn">해제</button>
-      </div>
-      <div class="slider-row">
-        <span>맞춤</span>
-        <label class="switch"><input type="checkbox" id="hairManual" checked><span>수동</span></label>
-      </div>
-      <div class="slider-row">
-        <span>크기</span>
-        <input type="range" id="hSize" min="50" max="140" value="100">
-        <output id="hSizeVal">100%</output>
-      </div>
-      <div class="slider-row">
-        <span>좌우</span>
-        <input type="range" id="hX" min="-40" max="40" value="0">
-        <output id="hXVal">0</output>
-      </div>
-      <div class="slider-row">
-        <span>상하</span>
-        <input type="range" id="hY" min="-40" max="40" value="0">
-        <output id="hYVal">0</output>
-      </div>
-      <div class="slider-row">
-        <span>이미지</span>
-        <input type="file" id="hairFile" accept="image/*">
-      </div>
     </div>
 
     <div class="card">

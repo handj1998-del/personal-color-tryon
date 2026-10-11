@@ -4,7 +4,7 @@
 importScripts('./version.js?v=' + (new URL(self.location.href).searchParams.get('v') || Date.now()));
 const VERSION = 'pc-tryon-' + self.APP_VERSION;
 const SHELL = ['./', './index.html', './version.js', './update.js', './style.css', './app.js', './frames.js', './face.js', './glasses3d.js', './reco.js', './gender.js', './manifest.webmanifest',
-  './assets/glasses/glasses.json',
+  './assets/glasses/glasses.json', './assets/brand/how-logo.png', './assets/brand/how-mark.png',
   './assets/sample.jpg', './icons/icon-192.png', './icons/icon-512.png', './icons/icon-maskable-512.png', './icons/apple-touch-icon.png', './icons/favicon-32.png', './assets/fonts/cormorant-latin.woff2'];
 const HEAVY = ['./assets/models/age_gender_model-weights_manifest.json', './assets/models/age_gender_model.bin', './vendor/mediapipe/vision_bundle.mjs', './vendor/mediapipe/face_landmarker.task', './vendor/mediapipe/hair_segmenter.tflite',
   './vendor/mediapipe/wasm/vision_wasm_internal.js', './vendor/mediapipe/wasm/vision_wasm_internal.wasm'];

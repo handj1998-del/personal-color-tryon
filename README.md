@@ -17,6 +17,10 @@ Static, 100% client-side web app (index.html / style.css / app.js / frames.js / 
 
 See `assets/CREDITS.md` for asset sources and licenses. Everything runs on-device; there is no server/API feature.
 
+## 새 브랜드 로고 (v46)
+- 수채화 H.O.W 로고(`assets/brand`: 전체 로고·글자 마크·O 아이콘, 아이보리 배경을 투명 처리)로 표지·상단 헤더·추천 화면·결과 시트·저장 이미지 하단 바·PWA 아이콘(O)을 교체. 로고 2초 길게 누르기 = 상담 설정 그대로.
+- 강조색을 로고 팔레트(피치 핑크·세이지·네이비)에 맞춰 살짝 조정.
+
 ## 실제 안경 (v45) · 내 머리 염색 (v44)
 - 헤어스타일 합성 기능 삭제: 헤어스타일 이미지·UI·추천, 이마 지우기/다시 칠하기 전부 제거 (결과 시트에서도 제외). `hairstyle.js`, `assets/hair` 삭제, 얼굴 좌표 함수는 `face.js`.
 - 헤어 컬러 = 고객 본인 머리 염색: MediaPipe 헤어 세그멘테이션(오프라인 캐시) → 부드러운 마스크(가이디드 필터로 모발 경계에 맞춤, 잔머리는 모발색 유사도로 보강, 얼굴 안쪽 피부색·눈썹 아래는 제외) → 휘도·결 유지 염색(원래 밝기 대비를 유지한 채 염색 색의 밝기로 이동, 크로마는 염색 색으로 블렌드, 그림자·광택은 채도 감소). 강도 슬라이더 = 염색 세기. 라이브(마스크 2~4프레임마다, 라이트 모드) · 사진 · 결과 시트 · 저장 이미지 모두 동일.

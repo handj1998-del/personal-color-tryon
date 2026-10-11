@@ -662,11 +662,13 @@ function buildExport() {
 function buildExport0(c) {
   const W = c.width, H = c.height, fs = Math.max(16, Math.round(W / 42)), bar = Math.round(fs * 2.6);
   const ex = mk(W, H + bar), x = ex.getContext('2d');
-  x.drawImage(c, 0, 0); x.fillStyle = '#fdf6f9'; x.fillRect(0, H, W, bar); x.fillStyle = '#3d3346'; x.font = `700 ${fs}px sans-serif`;
+  x.drawImage(c, 0, 0); x.fillStyle = '#faf8f4'; x.fillRect(0, H, W, bar);
+  const mk2 = brandCache['how-mark.png']; let lx = fs; if (mk2 && mk2.complete && mk2.naturalWidth) { const lh = bar * 0.5, lw = mk2.naturalWidth * lh / mk2.naturalHeight; x.drawImage(mk2, fs, H + (bar - lh) / 2, lw, lh); lx = fs * 1.6 + lw; }
+  x.fillStyle = '#2f3448'; x.font = `700 ${fs}px sans-serif`;
   const T = TYPES[S.type], sub = T.subs.find((s) => s[0] === S.sub)?.[1] || '';
   const parts = [`${T.e} ${T.n} ${sub}`, S.hair ? `헤어 ${S.hair.n}` : null,
     S.shape !== 'none' ? `안경 ${FRAMES[S.frame].n} ${SHAPES.find((s) => s.id === S.shape).n}` : null].filter(Boolean);
-  x.fillText(parts.join(' · '), fs, H + bar / 2 + fs * 0.35, W - fs * 7);
+  x.fillText(parts.join(' · '), lx, H + bar / 2 + fs * 0.35, W - fs * 7 - lx);
   x.font = `500 ${Math.round(fs * 0.7)}px sans-serif`; x.fillStyle = '#8a7f93';
   const dt = new Date().toLocaleDateString('ko-KR'), dw = x.measureText(dt).width; x.fillText(dt, W - dw - fs, H + bar / 2 + fs * 0.3);
   return ex;
@@ -687,6 +689,11 @@ async function share0() {
   try { await navigator.share({ files: [file], title: '퍼스널컬러 가상 피팅' }); } catch (e) { if (e.name !== 'AbortError') toast('공유할 수 없어요'); }
 }
 
+/* ------------------------------------------------------------------ brand images (v46) */
+const brandCache = {};
+function brandImg(fn) { let im = brandCache[fn]; if (!im) { im = brandCache[fn] = new Image(); im.src = new URL('./assets/brand/' + fn, import.meta.url).href; }
+  return im.complete && im.naturalWidth ? Promise.resolve(im) : new Promise((r) => { im.onload = () => r(im); im.onerror = () => r(null); setTimeout(() => r(im.naturalWidth ? im : null), 3000); }); }
+brandImg('how-mark.png');
 /* ------------------------------------------------------------------ result sheet (share) */
 // One H.O.W-branded portrait sheet (ivory / charcoal): type, face shape, before/after, the final look, the top-3 and a note.
 // Rendered once on demand into a single canvas, encoded, then released (S23 lite: ~1080x1820 = 8 MB for a moment).
@@ -714,8 +721,10 @@ async function buildSheet() {
   x.fillStyle = SH.ivory; x.fillRect(0, 0, W, H);
   // header
   x.textBaseline = 'alphabetic'; x.textAlign = 'center';
-  shText(x, 'H.O.W', W / 2, 150, '300 112px "HOW Serif", Georgia, serif', SH.ink);
-  x.fillStyle = SH.ink; x.globalAlpha = 0.35; x.fillRect(W / 2 - 26, 184, 52, 2); x.globalAlpha = 1;
+  const logo = await brandImg('how-logo.png');
+  if (logo) { const lh = 150, lw = logo.naturalWidth * lh / logo.naturalHeight; x.drawImage(logo, W / 2 - lw / 2, 40, lw, lh); }
+  else shText(x, 'H.O.W', W / 2, 150, '300 112px "HOW Serif", Georgia, serif', SH.ink);
+  x.fillStyle = SH.ink; x.globalAlpha = 0.35; x.fillRect(W / 2 - 26, 200, 52, 2); x.globalAlpha = 1;
   shText(x, '퍼스널컬러 가상 피팅 결과', W / 2, 238, '500 30px "Pretendard", "Noto Sans KR", sans-serif', '#55514b');
   const d = new Date(), ds = `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`;
   shText(x, ds, W / 2, 282, '400 24px "Pretendard", "Noto Sans KR", sans-serif', SH.mute);

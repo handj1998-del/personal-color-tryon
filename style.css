@@ -1,6 +1,6 @@
 :root{
-  --bg:#fdf6f9; --card:#ffffff; --ink:#3d3346; --muted:#8a7f93; --line:#efe4ec;
-  --accent:#e98fae; --accent2:#a99be8; --soft:#fbeaf1;
+  --bg:#fbf8f4; --card:#ffffff; --ink:#2f3448; --muted:#878791; --line:#ece5de;
+  --accent:#e0919b; --accent2:#93ad9e; --soft:#f9ece6;
   --spring:#ffd9c2; --summer:#d7e3fb; --autumn:#ecd9b8; --winter:#d8d3f2;
   --r:18px;
 }
@@ -308,3 +308,12 @@ body.cover-on .app-foot,body.reco-on .app-foot{visibility:hidden}
 .set-close{width:100%;min-height:48px;margin-top:10px;border-radius:999px;border:1px solid #2b2a28;background:#2b2a28;color:#faf8f4;font:inherit;font-size:15px;font-weight:600;cursor:pointer}
 @media (max-width:380px){.actions .seg button{padding:8px 10px}.act-r .pill{padding:10px 12px}}
 @media (max-width:440px){.act-r{width:100%}.act-r #btnSheet{flex:1;justify-content:center}}
+
+/* v46 brand logo (watercolour H.O.W): image marks; long-press for settings still works (no image callout / drag) */
+.wordmark .wm-img,.cv-mark img{display:block;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;-webkit-user-drag:none;pointer-events:none}
+.wordmark .wm-img{height:30px;width:auto}
+.rc-top .wordmark .wm-img{height:26px}
+@media (max-width:600px){.wordmark .wm-img{height:26px}}
+.cv-mark{font-size:0!important;letter-spacing:0!important;margin-right:0!important}
+.cv-mark img{width:min(78vw,520px);height:auto;margin:0 auto}
+@media (max-height:500px) and (orientation:landscape){.cv-mark img{width:auto;height:32vh}}

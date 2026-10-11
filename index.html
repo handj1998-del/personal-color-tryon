@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#faf8f4">
+<link rel="preload" as="image" href="assets/brand/how-logo.png">
 <meta name="description" content="안경테 · 헤어 컬러 실시간 가상 피팅 (퍼스널컬러 상담용, 사진은 기기 밖으로 전송되지 않음)">
 <title>가상이미지 매칭</title>
 <link rel="manifest" href="manifest.webmanifest">
@@ -21,7 +22,7 @@
 <body class="cover-on">
 <div id="cover" class="cover" role="button" tabindex="0" aria-label="H.O.W 퍼스널컬러 가상 피팅 — 화면을 터치해 시작하세요">
   <div class="cv-inner">
-    <h1 class="cv-mark">H.O.W</h1>
+    <h1 class="cv-mark"><img src="assets/brand/how-logo.png" alt="H.O.W Personal Color Studio" draggable="false"></h1>
     <span class="cv-rule" aria-hidden="true"></span>
     <p class="cv-sub">퍼스널컬러 가상 피팅</p>
     <div class="cv-tones" aria-label="봄 · 여름 · 가을 · 겨울"><i title="봄"></i><i title="여름"></i><i title="가을"></i><i title="겨울"></i></div>
@@ -39,7 +40,7 @@
   </div>
 </div>
 <section id="reco" class="reco" hidden>
-  <header class="rc-top"><span class="wordmark">H.O.W</span><span class="rc-step" id="rcStep">추천 진단</span><button id="rcSkip" class="rc-link">건너뛰고 바로 테스트 →</button></header>
+  <header class="rc-top"><span class="wordmark"><img class="wm-img" src="assets/brand/how-mark.png" alt="H.O.W" draggable="false"></span><span class="rc-step" id="rcStep">추천 진단</span><button id="rcSkip" class="rc-link">건너뛰고 바로 테스트 →</button></header>
   <div class="rc-cap" id="rcCap">
     <div class="rc-cam"><canvas id="rcVideo"></canvas><div class="rc-oval" aria-hidden="true"></div><p class="rc-hint" id="rcHint">정면을 바라봐 주세요</p></div>
     <div class="rc-cap-btns">
@@ -63,7 +64,7 @@
   </div>
 </section>
 <header class="top">
-  <div class="brand"><span class="wordmark">H.O.W</span><div><h1>퍼스널컬러 가상 피팅</h1><p>안경테 · 헤어 컬러 실시간 테스트</p></div></div>
+  <div class="brand"><span class="wordmark"><img class="wm-img" src="assets/brand/how-mark.png" alt="H.O.W" draggable="false"></span><div><h1>퍼스널컬러 가상 피팅</h1><p>안경테 · 헤어 컬러 실시간 테스트</p></div></div>
   <div class="top-right">
     <button id="btnHome" class="home" title="표지로 · 다음 고객" aria-label="다음 고객 (표지 화면으로)">🏠<span>다음 고객</span></button>
     <button id="btnInstall" class="install" hidden>📲 <span>앱 설치</span></button>

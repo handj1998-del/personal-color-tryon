@@ -17,7 +17,7 @@ Static, 100% client-side web app (index.html / style.css / app.js / frames.js / 
 
 See `assets/CREDITS.md` for asset sources and licenses. Everything runs on-device; there is no server/API feature.
 
-## 새 브랜드 로고 (v46, v47에서 약 23% 축소)
+## 새 브랜드 로고 (v46, v47·v48에서 단계적으로 축소)
 - 수채화 H.O.W 로고(`assets/brand`: 전체 로고·글자 마크·O 아이콘, 아이보리 배경을 투명 처리)로 표지·상단 헤더·추천 화면·결과 시트·저장 이미지 하단 바·PWA 아이콘(O)을 교체. 로고 2초 길게 누르기 = 상담 설정 그대로.
 - 강조색을 로고 팔레트(피치 핑크·세이지·네이비)에 맞춰 살짝 조정.
 

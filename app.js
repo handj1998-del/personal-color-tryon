@@ -722,7 +722,7 @@ async function buildSheet() {
   // header
   x.textBaseline = 'alphabetic'; x.textAlign = 'center';
   const logo = await brandImg('how-logo.png');
-  if (logo) { const lh = 150, lw = logo.naturalWidth * lh / logo.naturalHeight; x.drawImage(logo, W / 2 - lw / 2, 40, lw, lh); }
+  if (logo) { const lh = 116, lw = Math.round(logo.naturalWidth * lh / logo.naturalHeight); x.drawImage(logo, Math.round(W / 2 - lw / 2), 62, lw, lh); }
   else shText(x, 'H.O.W', W / 2, 150, '300 112px "HOW Serif", Georgia, serif', SH.ink);
   x.fillStyle = SH.ink; x.globalAlpha = 0.35; x.fillRect(W / 2 - 26, 200, 52, 2); x.globalAlpha = 1;
   shText(x, '퍼스널컬러 가상 피팅 결과', W / 2, 238, '500 30px "Pretendard", "Noto Sans KR", sans-serif', '#55514b');

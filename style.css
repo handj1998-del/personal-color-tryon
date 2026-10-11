@@ -311,9 +311,9 @@ body.cover-on .app-foot,body.reco-on .app-foot{visibility:hidden}
 
 /* v46 brand logo (watercolour H.O.W): image marks; long-press for settings still works (no image callout / drag) */
 .wordmark .wm-img,.cv-mark img{display:block;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;-webkit-user-drag:none;pointer-events:none}
-.wordmark .wm-img{height:30px;width:auto}
-.rc-top .wordmark .wm-img{height:26px}
-@media (max-width:600px){.wordmark .wm-img{height:26px}}
+.wordmark .wm-img{height:23px;width:auto}
+.rc-top .wordmark .wm-img{height:20px}
+@media (max-width:600px){.wordmark .wm-img{height:20px}}
 .cv-mark{font-size:0!important;letter-spacing:0!important;margin-right:0!important}
-.cv-mark img{width:min(78vw,520px);height:auto;margin:0 auto}
-@media (max-height:500px) and (orientation:landscape){.cv-mark img{width:auto;height:32vh}}
+.cv-mark img{width:min(60vw,400px);height:auto;margin:0 auto}
+@media (max-height:500px) and (orientation:landscape){.cv-mark img{width:auto;height:25vh}}

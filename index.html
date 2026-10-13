@@ -25,18 +25,18 @@
     <h1 class="cv-mark"><img src="assets/brand/how-logo.png" alt="H.O.W Personal Color Studio" draggable="false"></h1>
     <span class="cv-rule" aria-hidden="true"></span>
     <p class="cv-sub">퍼스널컬러 가상 피팅</p>
-    <div class="cv-tones" aria-label="봄 · 여름 · 가을 · 겨울"><i title="봄"></i><i title="여름"></i><i title="가을"></i><i title="겨울"></i></div>
+    <div class="cv-tones" aria-label="봄 · 여름 · 가을 · 겨울"><i class="s-spring" title="봄"></i><i class="s-summer" title="여름"></i><i class="s-autumn" title="가을"></i><i class="s-winter" title="겨울"></i></div>
     <ol class="cv-steps">
-      <li><b>01</b>카메라를 바라보세요</li>
-      <li><b>02</b>퍼스널컬러 타입 선택</li>
-      <li><b>03</b>안경·헤어를 입혀보고 저장</li>
+      <li><svg class="ic" aria-hidden="true"><use href="assets/wc/icons.svg#cam"/></svg><b>01</b>카메라를 바라보세요</li>
+      <li><svg class="ic" aria-hidden="true"><use href="assets/wc/icons.svg#palette"/></svg><b>02</b>퍼스널컬러 타입 선택</li>
+      <li><svg class="ic" aria-hidden="true"><use href="assets/wc/icons.svg#glasses"/></svg><b>03</b>안경·헤어를 입혀보고 저장</li>
     </ol>
   </div>
   <div class="cv-foot">
     <p class="cv-tap">화면을 터치해 시작하세요</p>
     <p class="cv-privacy">사진은 기기 안에서만 처리됩니다 · 전송·저장되지 않음</p>
     <p class="cv-load" id="cvLoad">준비 중…</p>
-    <p class="ver-line cv-ver"><span id="cvVer" data-ver></span><button type="button" class="upd-btn" data-upd aria-label="업데이트 확인">🔄 업데이트 확인</button></p>
+    <p class="ver-line cv-ver"><span id="cvVer" data-ver></span><button type="button" class="upd-btn" data-upd aria-label="업데이트 확인"><svg class="ic" aria-hidden="true"><use href="assets/wc/icons.svg#sync"/></svg>업데이트 확인</button></p>
   </div>
 </div>
 <section id="reco" class="reco" hidden>
@@ -44,7 +44,7 @@
   <div class="rc-cap" id="rcCap">
     <div class="rc-cam"><canvas id="rcVideo"></canvas><div class="rc-oval" aria-hidden="true"></div><p class="rc-hint" id="rcHint">정면을 바라봐 주세요</p></div>
     <div class="rc-cap-btns">
-      <label class="rc-link"><input type="file" id="rcFile" accept="image/*" hidden>사진 올리기</label>
+      <label class="rc-link"><input type="file" id="rcFile" accept="image/*" hidden><svg class="ic" aria-hidden="true"><use href="assets/wc/icons.svg#up"/></svg>사진 올리기</label>
       <button id="rcShot" class="rc-shutter" aria-label="촬영"><span></span></button>
       <span class="rc-cap-note">얼굴형 · 퍼스널컬러 분석</span>
     </div>
@@ -52,12 +52,12 @@
   <div class="rc-busy" id="rcBusy" hidden><div class="rc-spin"></div><p>얼굴형과 컬러를 분석하는 중…</p></div>
   <div class="rc-res" id="rcRes" hidden>
     <div class="rc-gbar" id="rcGBar"><span class="rc-glbl">성별</span><div class="rc-gbtns" id="rcGBtns" role="group" aria-label="성별 선택"></div><span class="rc-gnote" id="rcGNote"></span></div>
-    <div class="rc-left"><canvas id="rcMain"></canvas><div class="rc-thumbs" id="rcThumbs"></div><button id="rcShare" class="rc-share" type="button">📤 결과 공유 <small>카카오톡 · 갤러리</small></button></div>
+    <div class="rc-left"><canvas id="rcMain"></canvas><div class="rc-thumbs" id="rcThumbs"></div><button id="rcShare" class="rc-share" type="button" ><svg class="ic" aria-hidden="true"><use href="assets/wc/icons.svg#share"/></svg>결과 공유 <small>카카오톡 · 갤러리</small></button></div>
     <div class="rc-right">
       <div class="rc-sum" id="rcSum"></div>
-      <div class="rc-sec"><h3>퍼스널컬러 <small>컨설턴트가 직접 선택할 수 있어요</small></h3><div class="rc-seg" id="rcTypes"></div><div class="rc-seg sm" id="rcSubs"></div></div>
-      <div class="rc-sec"><h3>안경 추천</h3><ol class="rc-list" id="rcGlasses"></ol></div>
-      <div class="rc-sec"><h3>헤어 컬러 추천</h3><ol class="rc-list" id="rcColors"></ol></div>
+      <div class="rc-sec"><h3><svg class="ic" aria-hidden="true"><use href="assets/wc/icons.svg#palette"/></svg>퍼스널컬러 <small>컨설턴트가 직접 선택할 수 있어요</small></h3><div class="rc-seg" id="rcTypes"></div><div class="rc-seg sm" id="rcSubs"></div></div>
+      <div class="rc-sec"><h3><svg class="ic" aria-hidden="true"><use href="assets/wc/icons.svg#glasses"/></svg>안경 추천</h3><ol class="rc-list" id="rcGlasses"></ol></div>
+      <div class="rc-sec"><h3><svg class="ic" aria-hidden="true"><use href="assets/wc/icons.svg#drop"/></svg>헤어 컬러 추천</h3><ol class="rc-list" id="rcColors"></ol></div>
       <p class="rc-disc">얼굴 비율과 피부·모발·눈동자 색을 기기 안에서 분석한 참고용 추천입니다. 조명·카메라·메이크업에 따라 달라질 수 있으니 최종 진단은 컨설턴트가 확인해 주세요.</p>
       <div class="rc-actions"><button id="rcRetake" class="rc-btn ghost">다시 촬영</button><button id="rcGo" class="rc-btn">실시간 테스트 시작</button></div>
     </div>
@@ -66,11 +66,11 @@
 <header class="top">
   <div class="brand"><span class="wordmark"><img class="wm-img" src="assets/brand/how-mark.png" alt="H.O.W" draggable="false"></span><div><h1>퍼스널컬러 가상 피팅</h1><p>안경테 · 헤어 컬러 실시간 테스트</p></div></div>
   <div class="top-right">
-    <button id="btnHome" class="home" title="표지로 · 다음 고객" aria-label="다음 고객 (표지 화면으로)">🏠<span>다음 고객</span></button>
-    <button id="btnInstall" class="install" hidden>📲 <span>앱 설치</span></button>
+    <button id="btnHome" class="home" title="표지로 · 다음 고객" aria-label="다음 고객 (표지 화면으로)"><svg class="ic" aria-hidden="true"><use href="assets/wc/icons.svg#home"/></svg><span>다음 고객</span></button>
+    <button id="btnInstall" class="install" hidden><svg class="ic" aria-hidden="true"><use href="assets/wc/icons.svg#inst"/></svg><span>앱 설치</span></button>
     <div class="modes" role="tablist">
-      <button id="btnLive" class="mode on" role="tab"><i class="e">📷 </i>라이브</button>
-      <button id="btnPhoto" class="mode" role="tab"><i class="e">🖼️ </i>사진</button>
+      <button id="btnLive" class="mode on" role="tab"><i class="e"><svg class="ic" aria-hidden="true"><use href="assets/wc/icons.svg#cam"/></svg></i>라이브</button>
+      <button id="btnPhoto" class="mode" role="tab"><i class="e"><svg class="ic" aria-hidden="true"><use href="assets/wc/icons.svg#img"/></svg></i>사진</button>
     </div>
   </div>
 </header>
@@ -94,7 +94,7 @@
       <video id="video" playsinline muted autoplay></video>
       <div class="placeholder" id="placeholder">
         <div class="ph-inner">
-          <div class="ph-icon">🙂</div>
+          <div class="ph-icon" aria-hidden="true"></div>
           <p id="phText">모델을 불러오는 중이에요…</p>
           <div class="ph-btns">
             <button class="pill primary" id="phCamera">카메라 켜기</button>
@@ -106,14 +106,14 @@
       <div class="badge" id="status">준비 중…</div>
       <div class="badge right" id="fps"></div>
       <div class="stage-ctrls">
-        <button class="ctrl" id="btnHold" title="누르고 있는 동안 원본">👁️ 원본</button>
+        <button class="ctrl" id="btnHold" title="누르고 있는 동안 원본"><svg class="ic" aria-hidden="true"><use href="assets/wc/icons.svg#eye"/></svg>원본</button>
         <button class="shutter" id="btnCapture" title="촬영"><span></span></button>
-        <button class="ctrl" id="btnFlip" title="앞/뒤 카메라 전환" aria-label="앞/뒤 카메라 전환">⇄ 전환</button>
+        <button class="ctrl" id="btnFlip" title="앞/뒤 카메라 전환" aria-label="앞/뒤 카메라 전환"><svg class="ic" aria-hidden="true"><use href="assets/wc/icons.svg#swap"/></svg>전환</button>
       </div>
       <div class="stage-ctrls still" id="stillCtrls">
-        <button class="ctrl" id="btnHold2" title="누르고 있는 동안 원본">👁️ 원본</button>
-        <button class="ctrl primary" id="btnRelive">📷 다시 라이브</button>
-        <label class="ctrl"><input type="file" id="fileInput" accept="image/*" hidden>🖼️ 다른 사진</label>
+        <button class="ctrl" id="btnHold2" title="누르고 있는 동안 원본"><svg class="ic" aria-hidden="true"><use href="assets/wc/icons.svg#eye"/></svg>원본</button>
+        <button class="ctrl primary" id="btnRelive"><svg class="ic" aria-hidden="true"><use href="assets/wc/icons.svg#cam"/></svg>다시 라이브</button>
+        <label class="ctrl"><input type="file" id="fileInput" accept="image/*" hidden><svg class="ic" aria-hidden="true"><use href="assets/wc/icons.svg#img"/></svg>다른 사진</label>
       </div>
     </div>
     <div class="actions">
@@ -121,21 +121,21 @@
         <button id="cmpAfter" class="on">결과만</button>
         <button id="cmpSplit">전/후 나란히</button>
       </div>
-      <div class="act-r"><button class="pill" id="btnSave" title="지금 화면을 이미지로 저장">⬇️ 저장</button>
-      <button class="pill primary" id="btnSheet" title="결과 시트를 카카오톡 등으로 보내기">📤 결과 공유</button></div>
+      <div class="act-r"><button class="pill" id="btnSave" title="지금 화면을 이미지로 저장"><svg class="ic" aria-hidden="true"><use href="assets/wc/icons.svg#down"/></svg>저장</button>
+      <button class="pill primary" id="btnSheet" title="결과 시트를 카카오톡 등으로 보내기"><svg class="ic" aria-hidden="true"><use href="assets/wc/icons.svg#share"/></svg>결과 공유</button></div>
     </div>
-    <p class="privacy">🔒 사진·영상은 이 기기 안에서만 처리되며 서버로 전송되지 않아요.</p>
+    <p class="privacy"><svg class="ic" aria-hidden="true"><use href="assets/wc/icons.svg#lock"/></svg>사진·영상은 이 기기 안에서만 처리되며 서버로 전송되지 않아요.</p>
   </section>
 
   <aside class="panel">
     <div class="card">
-      <h2>퍼스널컬러 타입</h2>
+      <h2><svg class="ic" aria-hidden="true"><use href="assets/wc/icons.svg#palette"/></svg>퍼스널컬러 타입</h2>
       <div class="types" id="types"></div>
       <div class="subs" id="subs"></div>
     </div>
 
     <div class="card">
-      <div class="card-head"><h2>헤어 컬러</h2>
+      <div class="card-head"><h2><svg class="ic" aria-hidden="true"><use href="assets/wc/icons.svg#drop"/></svg>헤어 컬러</h2>
         <label class="switch"><input type="checkbox" id="worstToggle"><span>워스트 비교</span></label></div>
       <div class="swatches" id="hairList"></div>
       <div class="slider-row">
@@ -151,7 +151,7 @@
     </div>
 
     <div class="card">
-      <h2>안경테 컬러 · 소재</h2>
+      <h2><svg class="ic" aria-hidden="true"><use href="assets/wc/icons.svg#glasses"/></svg>안경테 컬러 · 소재</h2>
       <div class="swatches frames" id="frameList"></div>
       <h3>모양 <small>(좌우로 스크롤)</small></h3>
       <div class="shapes" id="shapeList"></div>

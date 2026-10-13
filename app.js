@@ -666,7 +666,7 @@ function buildExport0(c) {
   const mk2 = brandCache['how-mark.png']; let lx = fs; if (mk2 && mk2.complete && mk2.naturalWidth) { const lh = bar * 0.5, lw = mk2.naturalWidth * lh / mk2.naturalHeight; x.drawImage(mk2, fs, H + (bar - lh) / 2, lw, lh); lx = fs * 1.6 + lw; }
   x.fillStyle = '#2f3448'; x.font = `700 ${fs}px sans-serif`;
   const T = TYPES[S.type], sub = T.subs.find((s) => s[0] === S.sub)?.[1] || '';
-  const parts = [`${T.e} ${T.n} ${sub}`, S.hair ? `헤어 ${S.hair.n}` : null,
+  const parts = [`${T.n} ${sub}`, S.hair ? `헤어 ${S.hair.n}` : null,
     S.shape !== 'none' ? `안경 ${FRAMES[S.frame].n} ${SHAPES.find((s) => s.id === S.shape).n}` : null].filter(Boolean);
   x.fillText(parts.join(' · '), lx, H + bar / 2 + fs * 0.35, W - fs * 7 - lx);
   x.font = `500 ${Math.round(fs * 0.7)}px sans-serif`; x.fillStyle = '#8a7f93';
@@ -694,6 +694,7 @@ const brandCache = {};
 function brandImg(fn) { let im = brandCache[fn]; if (!im) { im = brandCache[fn] = new Image(); im.src = new URL('./assets/brand/' + fn, import.meta.url).href; }
   return im.complete && im.naturalWidth ? Promise.resolve(im) : new Promise((r) => { im.onload = () => r(im); im.onerror = () => r(null); setTimeout(() => r(im.naturalWidth ? im : null), 3000); }); }
 brandImg('how-mark.png');
+function wcImg(fn) { return new Promise((r) => { const im = new Image(); im.onload = () => r(im); im.onerror = () => r(null); im.src = new URL('./assets/wc/' + fn, import.meta.url).href; setTimeout(() => r(null), 3000); }); }
 /* ------------------------------------------------------------------ result sheet (share) */
 // One H.O.W-branded portrait sheet (ivory / charcoal): type, face shape, before/after, the final look, the top-3 and a note.
 // Rendered once on demand into a single canvas, encoded, then released (S23 lite: ~1080x1820 = 8 MB for a moment).
@@ -719,6 +720,9 @@ async function buildSheet() {
   const T = TYPES[S.type], sub = T.subs.find((q) => q[0] === S.sub)?.[1] || '', an = rc.an, top = rc.combos && rc.combos.length && an ? rc.combos : null;
   const W = SH.W, pad = 64, H = top ? 1950 : 1580, c = mk(W, H), x = c.getContext('2d');
   x.fillStyle = SH.ivory; x.fillRect(0, 0, W, H);
+  // v49 watercolour washes (corner pools in the logo palette), drawn faint so text and photos stay crisp
+  { const [wt, wb, ss] = await Promise.all([wcImg('wash-tl.webp'), wcImg('wash-br.webp'), wcImg('season-' + S.type + '.webp')]);
+    x.globalAlpha = 0.85; if (wt) x.drawImage(wt, -170, -190, 720, 720); if (wb) x.drawImage(wb, W - 560, H - 560, 720, 720); x.globalAlpha = 1; x.__ss = ss; }
   // header
   x.textBaseline = 'alphabetic'; x.textAlign = 'center';
   const logo = await brandImg('how-logo.png');
@@ -742,6 +746,7 @@ async function buildSheet() {
     shText(x, lab, X + 28, y + 42, '500 22px "Pretendard", sans-serif', SH.mute); shText(x, val, X + 28, y + 90, '700 36px "Pretendard", sans-serif', SH.ink, w - 56); };
   const cw = (W - pad * 2 - 24) / 2;
   chip(pad, cw, '퍼스널컬러', `${T.n} ${sub}`.trim()); chip(pad + cw + 24, cw, '얼굴형', an && an.fc ? SHAPES_KO[an.fc.shape] : '—');
+  if (x.__ss) { x.globalAlpha = 0.9; x.drawImage(x.__ss, pad + cw - 104, y + 14 - 0, 88, 88); x.globalAlpha = 1; }
   y += 116 + 40;
   // final look
   const L = lookTexts(S.hair, S.shape, S.frame);
@@ -794,7 +799,7 @@ window.__pc.buildSheet = buildSheet; window.__pc.shareSheet = shareSheet;
 function rerender() { if (S.mode === 'still') renderStill(); }
 initGlasses3D(() => rerender());
 function renderTypes() {
-  $('types').innerHTML = Object.entries(TYPES).map(([k, t]) => `<button class="type ${S.type === k ? 'on' : ''}" data-type="${k}" style="background:${t.bg}">${t.e}<span>${t.n}</span></button>`).join('');
+  $('types').innerHTML = Object.entries(TYPES).map(([k, t]) => `<button class="type ${S.type === k ? 'on' : ''}" data-type="${k}" style="background:${t.bg}"><i class="wc-season s-${k}" aria-hidden="true"></i><span>${t.n}</span></button>`).join('');
   $('subs').innerHTML = TYPES[S.type].subs.map(([k, n]) => `<button class="sub ${S.sub === k ? 'on' : ''}" data-sub="${k}">${TYPES[S.type].n.split(' ')[0]} ${n}</button>`).join('');
 }
 function hairBtn(h, worst) {

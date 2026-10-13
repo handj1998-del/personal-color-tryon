@@ -17,6 +17,10 @@ Static, 100% client-side web app (index.html / style.css / app.js / frames.js / 
 
 See `assets/CREDITS.md` for asset sources and licenses. Everything runs on-device; there is no server/API feature.
 
+## 수채화 그래픽 (v49)
+- 로고와 같은 수채화 톤(피치·핑크·세이지·네이비, 겹치는 반투명 형태)으로 장식 요소를 교체: 표지·추천·메인 배경 워시, 계절 컬러 풀(표지·타입 카드·결과 시트), 3단계·섹션·버튼 아이콘(SVG 스프라이트), 빈 화면 일러스트, 촬영 가이드, 카운트다운·설정 카드, 토스트, 결과 시트 배경.
+- 에셋은 `assets/wc`(각 50KB 이하, 합계 약 150KB)이며 `tools_wc.py`로 절차적으로 생성. 주요 버튼은 네이비 배경으로 대비를 높이고 터치 영역은 44px 이상.
+
 ## 새 브랜드 로고 (v46, v47·v48에서 단계적으로 축소)
 - 수채화 H.O.W 로고(`assets/brand`: 전체 로고·글자 마크·O 아이콘, 아이보리 배경을 투명 처리)로 표지·상단 헤더·추천 화면·결과 시트·저장 이미지 하단 바·PWA 아이콘(O)을 교체. 로고 2초 길게 누르기 = 상담 설정 그대로.
 - 강조색을 로고 팔레트(피치 핑크·세이지·네이비)에 맞춰 살짝 조정.

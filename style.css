@@ -317,3 +317,44 @@ body.cover-on .app-foot,body.reco-on .app-foot{visibility:hidden}
 .cv-mark{font-size:0!important;letter-spacing:0!important;margin-right:0!important}
 .cv-mark img{width:min(48vw,320px);height:auto;margin:0 auto}
 @media (max-height:500px) and (orientation:landscape){.cv-mark img{width:auto;height:20vh}}
+
+/* ================= v49 watercolour mood (procedural assets in assets/wc, all lazy CSS backgrounds / one SVG sprite) ================= */
+:root{--wc-peach:#f0a88c;--wc-pink:#e4929f;--wc-sage:#96b8a6;--wc-navy:#2c3a62;--wc-lav:#aaa8ce}
+.ic{width:1.25em;height:1.25em;flex:none;vertical-align:-.28em;margin-right:.32em;color:var(--wc-navy)}
+.mode .e .ic{margin-right:.25em}
+body{background:var(--bg) url(assets/wc/wash-tl.webp) no-repeat -120px -140px/440px auto}
+body::after{content:"";position:fixed;right:-140px;bottom:-140px;width:460px;height:460px;background:url(assets/wc/wash-br.webp) no-repeat center/contain;opacity:.7;pointer-events:none;z-index:-1}
+.cover{background:url(assets/wc/wash-tl.webp) no-repeat -16vmin -18vmin/min(78vmin,620px) auto,url(assets/wc/wash-br.webp) no-repeat right -16vmin bottom -16vmin/min(78vmin,620px) auto,radial-gradient(120% 90% at 50% 38%,#fdfcf9 0%,#f7f4ee 70%,#f2eee6 100%)}
+.cv-tones{gap:4px}
+.cv-tones i{width:clamp(26px,4.6vmin,38px)!important;height:clamp(26px,4.6vmin,38px)!important;border-radius:0!important;background-color:transparent!important;background-size:contain!important;background-repeat:no-repeat!important;margin:0 -3px}
+.s-spring{background-image:url(assets/wc/season-spring.webp)!important}.s-summer{background-image:url(assets/wc/season-summer.webp)!important}.s-autumn{background-image:url(assets/wc/season-autumn.webp)!important}.s-winter{background-image:url(assets/wc/season-winter.webp)!important}
+.cv-steps li{display:flex;align-items:center}
+.cv-steps .ic{width:1.9em;height:1.9em;margin-right:.45em;color:var(--ink2)}
+.cv-steps b{font-style:italic}
+.wc-season{display:block;width:30px;height:30px;background:no-repeat center/contain;margin-bottom:2px}
+.type{background-image:none;border:1px solid #0000}
+.types .type{background:#fffdf9!important;border:1px solid var(--line)}
+.types .type.on{border:2px solid var(--wc-navy);background:#fff url(assets/wc/strip.webp) no-repeat center/180% auto!important}
+.sw{background:#fffdf9;border:1px solid var(--line)}
+.sw.on{border:2px solid var(--wc-navy);background:#fff url(assets/wc/strip.webp) no-repeat center/260% auto}
+.sw .best{background:var(--wc-navy);font-family:"HOW Serif",Georgia,serif;letter-spacing:.06em;font-weight:600}
+.card{background:#fffdf9e8;border-color:#ece5de}
+.card h2,.rc-sec h3{font-family:"HOW Serif","Pretendard",Georgia,serif;letter-spacing:.02em;display:flex;align-items:center}
+.card h2 .ic,.rc-sec h3 .ic{width:1.5em;height:1.5em}
+.placeholder{background:url(assets/wc/wash-tl.webp) no-repeat -30% -40%/70% auto,url(assets/wc/wash-br.webp) no-repeat 130% 140%/70% auto,#faf6f0}
+.ph-icon{width:96px;height:96px;margin:0 auto;background:url(assets/wc/ph.webp) no-repeat center/contain;font-size:0}
+.badge{background:#fffdf9e6;color:var(--wc-navy);border:1px solid #ece5de}
+.rc-oval{border:2px solid #fbe3d6e6;box-shadow:0 0 0 4px #96b8a640,0 0 0 2000px #1d1c1a55}
+.pill.primary,.ctrl.primary{background:var(--wc-navy);color:#fffdf9}
+.pill.primary .ic,.ctrl.primary .ic,.rc-seg button.on .ic{color:#fffdf9}
+.mode.on{box-shadow:0 2px 8px #96b8a655}
+.ctrl,.pill,.mode,.home,.install,.rc-seg button,.rc-link,.upd-btn{min-height:44px}
+.upd-btn{display:inline-flex;align-items:center}
+.toast{background:var(--wc-navy) url(assets/wc/strip.webp) no-repeat left -40px center/220px auto;background-blend-mode:soft-light;color:#fffdf9;font-family:inherit}
+.idle-card,.set-box{background:#faf8f4 url(assets/wc/strip.webp) no-repeat center top/100% auto}
+.idle-n{color:var(--wc-navy);font-style:italic}
+.idle-btns button,.set-close,.set-seg button.on{background:var(--wc-navy);border-color:var(--wc-navy)}
+.idle-btns .ghost{background:#fffdf9;color:var(--wc-navy)}
+.rc-share{border-color:var(--wc-navy);color:var(--wc-navy)}
+.reco{background:#faf8f4 url(assets/wc/wash-tl.webp) no-repeat -140px -160px/440px auto}
+.top{background:#faf8f4 url(assets/wc/strip.webp) no-repeat right -60px center/420px auto}
